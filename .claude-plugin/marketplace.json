@@ -11,7 +11,7 @@
       "name": "css-pro",
       "source": "./",
       "description": "A frontend design co-pilot for Claude Code: opinionated skills for design decisions, CSS mechanics, motion craft, and library picks. Covers raw CSS, custom properties, design tokens, motion, and accessibility.",
-      "version": "0.1.0"
+      "version": "0.2.0"
     }
   ]
 }
