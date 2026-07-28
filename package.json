@@ -1,0 +1,12 @@
+{
+  "name": "css-pro",
+  "version": "0.1.0",
+  "private": true,
+  "description": "",
+  "scripts": {
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.8.4"
+  }
+}

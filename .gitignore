@@ -1,0 +1,6 @@
+__pycache__
+node_modules
+.ruff_cache
+.claude/logs
+.claude/refs
+.claude/settings.local.json
