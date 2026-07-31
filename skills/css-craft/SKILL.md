@@ -5,64 +5,36 @@ description: Use when writing or refactoring CSS — custom properties and var()
 
 # CSS Craft
 
-How CSS actually behaves, in the places it behaves surprisingly. This skill has no view
-on what your CSS should look like — no naming convention, no token taxonomy, no opinion
-on when a value deserves a name. Those are yours. What is here is mechanics: rules the
-browser enforces whether or not you know them.
+How CSS actually behave, in place it behave surprising. Skill got no view on how your CSS should look — no naming convention, no token taxonomy, no opinion on when value deserve name. Those yours. Here: mechanics. Rules browser enforce whether you know or not.
 
 Four **leading words**:
 
-- **custom property** — a named value (`--color-danger`) read back with `var()`.
+- **custom property** — named value (`--color-danger`) read back with `var()`.
 - **shorthand** — one declaration setting several properties (`margin: 10px 5px`).
-- **reset** — what a shorthand does to every longhand it omits: snaps it to its initial
-  value. The trap that makes declaration order matter.
-- **function** — a value computed at render time (`clamp()`, `color-mix()`, `anchor()`)
-  rather than hardcoded.
+- **reset** — what shorthand does to every longhand it omits: snaps to initial value. Trap that make declaration order matter.
+- **function** — value computed at render time (`clamp()`, `color-mix()`, `anchor()`) rather than hardcoded.
 
 ## Reference bodies
 
-Open the one the work needs:
+Open one work need:
 
-- [`TOKENS.md`](TOKENS.md) — custom properties end to end: scope and the cascade,
-  `@property` typing and animation, fallbacks, the three computation gotchas that
-  produce "why is my value missing", responsive re-pointing, container queries, theming,
-  reading and writing from JS.
-- [`SHORTHAND.md`](SHORTHAND.md) — value-count rules for sides (TRBL) and corners, the
-  order values take in `background`/`font`/`border`/`animation`/`transition`/`flex`/
-  `grid`, and the reset trap in full.
-- [`LAYOUT.md`](LAYOUT.md) — intrinsic grid and flex patterns, one-line upgrades that
-  retire old hacks (`aspect-ratio`, `text-wrap: balance`, `accent-color`), and
-  `:where()` / `:has()` / `@layer`.
-- [`FUNCTIONS.md`](FUNCTIONS.md) — picking a value function by intent, and the trap that
-  keeps each one correct.
+- [`TOKENS.md`](TOKENS.md) — custom properties end to end: scope and cascade, `@property` typing and animation, fallbacks, three computation gotchas that produce "why is my value missing", responsive re-pointing, container queries, theming, reading and writing from JS.
+- [`SHORTHAND.md`](SHORTHAND.md) — value-count rules for sides (TRBL) and corners, order values take in `background`/`font`/`border`/`animation`/`transition`/`flex`/`grid`, and reset trap in full.
+- [`LAYOUT.md`](LAYOUT.md) — intrinsic grid and flex patterns, one-line upgrades that retire old hacks (`aspect-ratio`, `text-wrap: balance`, `accent-color`), and `:where()` / `:has()` / `@layer`.
+- [`FUNCTIONS.md`](FUNCTIONS.md) — picking value function by intent, and trap that keeps each one correct.
 
 ## The four things that bite
 
-**Shorthand resets what it omits.** `background: red` clears `background-image`,
-`background-position`, and the rest. A longhand set _before_ its shorthand is discarded.
-Fold it in, or declare it after. Full per-property detail in
-[`SHORTHAND.md`](SHORTHAND.md).
+**Shorthand resets what it omits.** `background: red` clears `background-image`, `background-position`, rest. Longhand set _before_ shorthand gets discarded. Fold it in, or declare after. Full per-property detail in [`SHORTHAND.md`](SHORTHAND.md).
 
-**An invalid `var()` cannot fall back to an earlier declaration.** Those were discarded
-at parse time, so the property falls to its inherited or initial value instead —
-`color: blue; color: var(--broken)` gives you inherited colour, not blue. Give every
-`var()` a fallback of the right type. See the computation gotchas in
-[`TOKENS.md`](TOKENS.md).
+**Invalid `var()` cannot fall back to earlier declaration.** Those discarded at parse time, property falls to inherited or initial value instead — `color: blue; color: var(--broken)` gives inherited colour, not blue. Give every `var()` fallback of right type. See computation gotchas in [`TOKENS.md`](TOKENS.md).
 
-**An untyped custom property cannot be interpolated.** A plain `--stop: red` snaps
-between values; the same property registered with `@property` and `syntax: '<color>'`
-transitions smoothly. Register anything you put in a `transition` or `@keyframes`.
+**Untyped custom property cannot be interpolated.** Plain `--stop: red` snaps between values; same property registered with `@property` and `syntax: '<color>'` transitions smooth. Register anything you put in `transition` or `@keyframes`.
 
-**Computed values are frozen on inheritance.** `--size-lg: calc(2 * var(--size))` on
-`:root` computes once; redefining `--size` on a descendant does not recompute it. Do the
-arithmetic where the value is consumed.
+**Computed values frozen on inheritance.** `--size-lg: calc(2 * var(--size))` on `:root` computes once; redefining `--size` on descendant won't recompute it. Do arithmetic where value consumed.
 
 ## Responsive
 
-Put the layout maths in once, against custom properties, then re-point only those
-properties inside the query — the logic never reopens. A media query cannot _read_ a
-custom property, but it can freely _re-declare_ one.
+Put layout maths in once, against custom properties, then re-point only those properties inside query — logic never reopens. Media query cannot _read_ custom property, but can freely _re-declare_ one.
 
-Prefer a container query whenever the trigger is "this component got narrow" rather than
-"this device is small"; prefer a fluid `clamp()` to either when the value can simply
-adapt on its own. Recipes in [`TOKENS.md`](TOKENS.md).
+Prefer container query whenever trigger is "this component got narrow" rather than "this device is small"; prefer fluid `clamp()` to either when value can simply adapt on own. Recipes in [`TOKENS.md`](TOKENS.md).
