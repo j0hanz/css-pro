@@ -1,6 +1,6 @@
 ---
 name: motion-craft
-description: Use when building or deciding a specific web animation, or reviewing animation/motion code in a diff — easing, duration, origin, plus the physics of how motion feels and the vocabulary for naming an effect.
+description: Use when building or deciding web animation — CSS transitions, transform animations, @keyframes, springs, hover and entrance effects, popovers/drawers, scroll-driven motion — or reviewing animation/motion code in a diff. Covers easing, duration, origin, the physics of motion feel, and the vocabulary for naming an effect.
 ---
 
 # Motion Craft
