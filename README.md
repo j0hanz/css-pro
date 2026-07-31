@@ -46,16 +46,6 @@ enforcement lives in the hook, not here.
 | [css-craft](skills/css-craft/SKILL.md)       | custom properties and `var()`, shorthand and the reset trap, intrinsic layout, CSS value functions |
 | [motion-craft](skills/motion-craft/SKILL.md) | whether and how to animate; easing, duration, origin; effect vocabulary and the physics of feel    |
 
-## Development
-
-```
-node hooks/rules.test.mjs
-```
-
-Each rule has a defect that must fire and near-misses that must not. The near-misses are
-the point: a rule that fires on a comment, or on legitimate CSS, is worse than no rule.
-A blocking rule that produces a single false positive is demoted to an advisory.
-
 ## License
 
 [MIT](LICENSE)
