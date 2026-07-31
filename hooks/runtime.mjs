@@ -24,7 +24,7 @@ const RULES = [
   },
   {
     tier: 'block',
-    re: /z-index:\s*(?:9999|99999|2147483647)\b/i,
+    re: /z-index\s*:\s*(?:9{4,}|2147483647)\b/i,
     msg: 'Magic `z-index` — lazy stacking. Use the project z-index token or a documented scale. (css-craft)',
   },
   {
@@ -34,7 +34,7 @@ const RULES = [
   },
   {
     tier: 'block',
-    re: /(?<![\w-])transition(?:-property)?\s*:[^;{}]*(?<![-\w])(?:width|height|margin|padding|top|left)\b/i,
+    re: /(?<![\w-])transition(?:-property)?\s*:[^;{}]*(?<![-\w])(?:(?:min|max)-(?:width|height)|width|height|margin|padding|top|left)\b/i,
     msg: 'Transitioning a layout property — runs layout + paint on the main thread. Animate `transform`/`opacity` instead. (motion-craft)',
   },
   {
@@ -56,7 +56,7 @@ const RULES = [
   },
   {
     tier: 'block',
-    re: /\b(background|font|border)(?!-radius\b)-[a-z-]+\s*:[^{}]*;[^{}]*\b\1\s*:/i,
+    re: /(?<![\w-])(background|font|border)(?!-radius\b)-[a-z-]+\s*:[^{}]*;[^{}]*(?<![\w-])\1\s*:/i,
     msg: 'Longhand before its shorthand in the same block — the shorthand resets every longhand it omits. Fold it in or reorder. (css-craft)',
   },
   // ---- advise: pattern-detectable, excuse may live elsewhere ----
@@ -67,7 +67,7 @@ const RULES = [
   },
   {
     tier: 'advise',
-    re: /(?<![\w-])(?:transition|animation)(?:-[a-z]+)?\s*:[^;{}]*?(?:\b(?:[6-9]\d{2}|\d{4,})ms\b|(?<![\w.])(?:0?\.[6-9]\d*|[1-9]\d*(?:\.\d+)?)s\b)(?![^;{}]*\binfinite\b)/i,
+    re: /(?<![\w-])(?:transition|animation)(?:-(?!delay)[a-z]+)?\s*:[^;{}]*?(?:\b(?:[6-9]\d{2}|\d{4,})ms\b|(?<![\w.])(?:0?\.[6-9]\d*|[1-9]\d*(?:\.\d+)?)s\b)(?![^;{}]*\binfinite\b)/i,
     msg: '≥600ms on UI — stay under 300ms; modals ≤500ms. State the reason or cut it. (motion-craft)',
   },
   {
@@ -139,13 +139,13 @@ try {
   const advisories = [];
   for (const rule of RULES) {
     if (rule.re) {
-      if (rule.re.test(added)) (rule.tier === 'block' ? blocks : advisories).push(rule.msg);
-      continue;
+      if (!rule.re.test(added)) continue;
+    } else {
+      if (!rule.when.every((w) => w.test(added))) continue;
+      const f = fileText();
+      if (f === false || rule.absent.test(f)) continue;
     }
-    if (!rule.when.every((w) => w.test(added))) continue;
-    const f = fileText();
-    if (f === false || rule.absent.test(f)) continue;
-    advisories.push(rule.msg);
+    (rule.tier === 'block' ? blocks : advisories).push(rule.msg);
   }
 
   if (blocks.length) {
