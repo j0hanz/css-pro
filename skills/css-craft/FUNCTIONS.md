@@ -1,6 +1,6 @@
 # CSS Functions — the long tail
 
-Picker in `SKILL.md` dispatches common intents; its "Traps that bite" covers traps. This file is the rest — functions new, non-obvious, or needing a usecase to use right. Each entry: usecase, copyable call. Obvious functions (`rgb`, `hsl`, `blur`, `translate`, `linear-gradient`, `matrix`, …) live in pretraining, not here.
+`SKILL.md`'s **"The four things that bite"** covers the traps common to declarations. This file is the rest — functions new, non-obvious, or needing a usecase to use right. Each entry: usecase, copyable call. Obvious functions (`rgb`, `hsl`, `blur`, `translate`, `linear-gradient`, `matrix`, …) live in pretraining, not here.
 
 ## Math
 

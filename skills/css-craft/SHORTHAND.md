@@ -1,10 +1,10 @@
 # Shorthand
 
-**Shorthand** set many properties one declaration — `margin: 10px 5px`, `border: 1px solid black`. Compress longhand sprawl to one line. This shorthand layer: reset trap, value-count rules, per-property order for high-traffic shorthands. Naming values: see [`TOKENS.md`](TOKENS.md). Process: see [`SKILL.md`](SKILL.md).
+**Shorthands** set many properties in one declaration — `margin: 10px 5px`, `border: 1px solid black`. They compress longhand sprawl to one line. This file is the shorthand layer: the reset trap, value-count rules, per-property order for high-traffic shorthands. Naming values: see [`TOKENS.md`](TOKENS.md). Process: see [`SKILL.md`](SKILL.md).
 
 ## The reset trap (read this first)
 
-Shorthand **reset** every longhand it cover to that longhand's _initial_ value. Omitted values not preserved — wiped to default. This the rule that bite.
+Shorthands **reset** every longhand they cover to that longhand's _initial_ value. Omitted values are not preserved — they are wiped to the default. This is the rule that bites.
 
 ```css
 p {
@@ -21,7 +21,7 @@ Shorthand `background` reset `background-color` to `transparent` because omitted
 - **Order across rules matters too** — later rule's shorthand reset what earlier rule's longhand set.
 - **Compound shorthands reset hard** — `grid` reset `grid-template-*` _and_ `grid-auto-flow`, `-columns`, `-rows`. `flex` reset `flex-grow`, `-shrink`, `-basis`. `border` reset `border-width`, `-style`, `-color` _and_ per-side `border-*`. Use only when mean to set every longhand they cover.
 
-Reach for shorthand only when mean to set (or accept initial for) every longhand it cover. Keep prior longhand untouched: don't use shorthand for it — use longhand, or set kept value after.
+Reach for shorthand only when you mean to set (or accept initial for) every longhand it covers. Keep prior longhand untouched: don't use shorthand for it — use longhand, or set kept value after.
 
 ## Value-count syntax — box sides: TRBL
 

@@ -1,6 +1,6 @@
 ---
 name: css-craft
-description: Use when writing or refactoring CSS — custom properties and var(), shorthand and the reset trap, intrinsic layout, and choosing a value function (clamp/color-mix/oklch/anchor/scroll) with its gotchas. Mechanics reference for how CSS behaves, not a house style.
+description: Use when writing or refactoring CSS — custom properties and var(), shorthand and the reset trap, intrinsic layout, fluid sizing with clamp(), and the modern value-function long tail (calc-size/if/linear/shape/image-set) with its support traps. Mechanics reference for how CSS behaves, not a house style.
 ---
 
 # CSS Craft
