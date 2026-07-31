@@ -8,6 +8,7 @@
 
 import { extname } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { text } from 'node:stream/consumers';
 import { strip } from './strip.mjs';
 import { BLOCK, ADVISE } from './rules.mjs';
 
@@ -21,13 +22,6 @@ const HOST = /\.([cm]?[jt]sx?|vue|svelte)$/i;
 // the common case costs one regex and an exit.
 const STYLE_MARKERS =
   /(?:styled|css|keyframes|createGlobalStyle)\s*[.(`]|style\s*=\s*\{\{|createStyles\s*\(|\bstyle\s*\(\s*\{/;
-
-async function readStdin() {
-  let d = '';
-  process.stdin.setEncoding('utf8');
-  for await (const c of process.stdin) d += c;
-  return d;
-}
 
 function addedText({ tool_name, tool_input = {} }) {
   if (tool_name === 'Write') return tool_input.content ?? '';
@@ -57,7 +51,7 @@ function run(rules, added, readFile) {
 }
 
 try {
-  const payload = JSON.parse((await readStdin()) || '{}');
+  const payload = JSON.parse((await text(process.stdin)) || '{}');
   const path = payload.tool_input?.file_path;
   if (!path) process.exit(0);
 
@@ -83,6 +77,9 @@ try {
     return cached;
   };
 
+  // Nothing calls process.exit() past this point: stdout is a pipe, and on POSIX a pipe
+  // write is async — exiting on the next line truncates it, and a truncated deny is an
+  // allow. The process ends on its own once stdin is drained.
   if (MODE === 'pre') {
     const blocks = run(BLOCK, added, readFile);
     if (blocks.length) {
@@ -99,27 +96,25 @@ try {
         }),
       );
     }
-    process.exit(0);
+  } else {
+    const advisories = run(ADVISE, added, readFile);
+    if (advisories.length) {
+      const shown = advisories.slice(0, ADVISORY_CAP);
+      const withheld = advisories.length - shown.length;
+      process.stdout.write(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PostToolUse',
+            additionalContext:
+              `css-pro on ${path}:\n` +
+              shown.map((m) => `- ${m}`).join('\n') +
+              (withheld ? `\n(${withheld} further finding(s) not shown.)` : ''),
+          },
+        }),
+      );
+    }
   }
-
-  const advisories = run(ADVISE, added, readFile);
-  if (advisories.length) {
-    const shown = advisories.slice(0, ADVISORY_CAP);
-    const withheld = advisories.length - shown.length;
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: 'PostToolUse',
-          additionalContext:
-            `css-pro on ${path}:\n` +
-            shown.map((m) => `- ${m}`).join('\n') +
-            (withheld ? `\n(${withheld} further finding(s) not shown.)` : ''),
-        },
-      }),
-    );
-  }
-  process.exit(0);
 } catch {
   // A broken hook must never be the reason someone cannot edit a stylesheet.
-  process.exit(0);
+  // Falling out of the catch exits 0 without truncating a partial write.
 }

@@ -6,7 +6,7 @@
 //   { re, msg }             — tested against the added text (comments/strings stripped)
 //   { when, absent, msg }   — every `when` matches the added text AND `absent` is
 //                             missing from the whole file
-//   { fn, msg }             — arbitrary check over (addedText, fileText)
+//   { fn, msg }             — arbitrary check over the added text
 //
 // `tier: 'block'` runs on PreToolUse and refuses the write. It is reserved for claims
 // provable from the edit alone, with no false positives. Everything else advises.
@@ -45,8 +45,11 @@ export const BLOCK = [
     msg: '`oklch()` and `oklab()` lightness is 0–1, or a percentage. A bare value above 1 silently clamps and gives you the wrong colour.',
   },
   {
+    // The excluded properties share the prefix but are not longhands of the shorthand,
+    // so it does not reset them: every *-radius corner, border-collapse/-spacing,
+    // background-blend-mode, font-smooth(ing).
     id: 'longhand-before-shorthand',
-    re: /(?<![\w-])(background|font|border)(?!-radius\b)-[a-z-]+\s*:[^{}]*;[^{}]*(?<![\w-])\1\s*:/i,
+    re: /(?<![\w-])(background|font|border)(?!-[a-z-]*(?:radius|collapse|spacing|blend-mode|smooth(?:ing)?)\b)-[a-z-]+\s*:[^{}]*;[^{}]*(?<![\w-])\1\s*:/i,
     msg: 'A longhand set before its shorthand is discarded — the shorthand resets every longhand it omits. Fold it in, or move it after.',
   },
   {

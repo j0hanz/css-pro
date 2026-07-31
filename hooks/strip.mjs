@@ -33,23 +33,17 @@ export function strip(text, filePath = '') {
       continue;
     }
 
-    if (c === '"' || c === "'" || c === '`') {
-      // Template literals carry the CSS in styled-components, so their contents are
-      // real declarations — keep them. Quoted strings are content/urls, so blank them.
-      if (c === '`') {
-        out += c;
-        i++;
-        continue;
-      }
+    // Template literals carry the CSS in styled-components, so their contents are real
+    // declarations and fall through untouched. Quoted strings are content/urls: blank them.
+    if (c === '"' || c === "'") {
       let j = i + 1;
-      while (j < text.length && text[j] !== c) {
-        if (text[j] === '\\') j++;
-        if (text[j] === '\n') break; // unterminated: don't swallow the rest of the file
-        j++;
+      // An unterminated quote stops at the newline rather than swallowing the file.
+      while (j < text.length && text[j] !== c && text[j] !== '\n') {
+        j += text[j] === '\\' ? 2 : 1;
       }
-      const stop = Math.min(j + 1, text.length);
-      out += c + blank(text.slice(i + 1, stop - 1)) + (text[stop - 1] === c ? c : '');
-      i = stop;
+      const closed = text[j] === c;
+      out += c + blank(text.slice(i + 1, j)) + (closed ? c : '');
+      i = closed ? j + 1 : j; // leave the newline for the next pass — line count must hold
       continue;
     }
 
