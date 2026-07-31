@@ -4,3 +4,4 @@ node_modules
 .claude/logs
 .claude/refs
 .claude/settings.local.json
+.wayfinder

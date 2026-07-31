@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "css-pro",
-  "description": "css-pro — a frontend design and CSS co-pilot plugin for Claude Code.",
+  "description": "Stops agents wrecking your CSS. Checks CSS as it is written and refuses writes carrying provable defects — invalid values, declarations that silently do nothing, dead custom properties, accessibility failures. Raw CSS and CSS-in-JS; makes no style decisions for you.",
   "owner": {
     "name": "j0hanz",
     "email": "l.johansson93@outlook.com"
@@ -10,8 +10,8 @@
     {
       "name": "css-pro",
       "source": "./",
-      "description": "A frontend design co-pilot for Claude Code: opinionated skills for design decisions, CSS mechanics, motion craft, and library picks. Covers raw CSS, custom properties, design tokens, motion, and accessibility.",
-      "version": "0.2.0"
+      "description": "Stops agents wrecking your CSS. Checks CSS as it is written and refuses writes carrying provable defects — invalid values, declarations that silently do nothing, dead custom properties, accessibility failures. Raw CSS and CSS-in-JS; makes no style decisions for you.",
+      "version": "0.3.0"
     }
   ]
 }

@@ -1,6 +1,6 @@
 # Tokens
 
-A **token** is a custom property — `--name: value` — referred to with `var()`. This is the custom-property layer: declaring, substituting, typing, and driving custom properties. For naming and which tokens to swap for theming, see **designer**; for compressing declarations, see [`SHORTHAND.md`](SHORTHAND.md); for the process, see [`SKILL.md`](SKILL.md).
+A **token** is a custom property — `--name: value` — referred to with `var()`. This is the custom-property layer: declaring, substituting, typing, and driving custom properties. For compressing declarations, see [`SHORTHAND.md`](SHORTHAND.md); for the process, see [`SKILL.md`](SKILL.md).
 
 ## Declare and use
 
@@ -212,7 +212,7 @@ Prefer a container query over a media query whenever the trigger is "this compon
 
 ## Theming — override on a selector
 
-Themes are scoped overrides: re-declare tokens under `[data-theme]` / a class on `:root` / `html` / `body` and the cascade reapplies every consumer; toggle the attribute (JS `setProperty` / remove) to swap. For which tokens to swap, see **designer**. Put a `transition` on the _consuming_ properties for a smooth change — you cannot transition an unregistered token, so for a token that must animate its own value, register it with `@property` first.
+Themes are scoped overrides: re-declare tokens under `[data-theme]` / a class on `:root` / `html` / `body` and the cascade reapplies every consumer; toggle the attribute (JS `setProperty` / remove) to swap. Put a `transition` on the _consuming_ properties for a smooth change — you cannot transition an unregistered token, so for a token that must animate its own value, register it with `@property` first.
 
 ## JS — live read and write
 

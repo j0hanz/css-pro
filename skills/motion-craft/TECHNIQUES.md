@@ -77,7 +77,7 @@ Use `@starting-style` when browser support allows; else fall back to `data-mount
 
 ## Gestures & drag
 
-For physics (momentum projection, rubber-band formula, gesture hysteresis, velocity handoff) see `motion-foundations`; here practical patterns.
+For physics (momentum projection, rubber-band formula, gesture hysteresis, velocity handoff) see [`PHYSICS.md`](PHYSICS.md); here practical patterns.
 
 **Momentum-based dismissal** — no need drag past threshold; compute velocity (`Math.abs(dragDistance) / elapsedTime`) and dismiss if velocity over ~0.11 regardless of distance. Quick flick enough.
 

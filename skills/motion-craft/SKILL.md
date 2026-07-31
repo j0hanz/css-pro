@@ -1,13 +1,11 @@
 ---
 name: motion-craft
-description: Use when building or deciding a specific web animation, or reviewing animation/motion code in a diff; for the physics of how motion feels, use motion-foundations.
+description: Use when building or deciding a specific web animation, or reviewing animation/motion code in a diff — easing, duration, origin, plus the physics of how motion feels and the vocabulary for naming an effect.
 ---
 
 # Motion Craft
 
-See also: motion-advisor (audit motion across a codebase / find where to add it), pick-ui-library (pick a library), css-functions (cubic-bezier()/steps()/linear() syntax and gotchas).
-
-Prescriptive half of motion: what good motion _is_, how to _decide_ it, how to _review_ it. This the bar system audits against — `motion-advisor` cites these values instead of re-embedding, so they live one place. Descriptive knowledge (effect names, how motion physically feels) lives in `motion-foundations`; cite it for formulas and names, don't duplicate.
+Prescriptive half of motion: what good motion _is_, how to _decide_ it, how to _review_ it. Descriptive knowledge — effect names in [`GLOSSARY.md`](GLOSSARY.md), how motion physically feels in [`PHYSICS.md`](PHYSICS.md) — sits alongside; cite it for formulas and names rather than duplicating.
 
 ## The decision engine
 
@@ -52,7 +50,7 @@ Done = all four questions answered, easing token + duration chosen, origin + int
 
 ## Springs
 
-Springs feel natural because they simulate physics — no fixed duration; they settle on their parameters. Use for drag interactions with momentum, elements that should feel "alive" (Apple's Dynamic Island), gestures interruptible mid-animation, decorative mouse-tracking. (Physics of springs in gesture-driven motion — velocity handoff, momentum projection, rubber-banding, decomposing 2D motion into X and Y — see `motion-foundations`; here is config.)
+Springs feel natural because they simulate physics — no fixed duration; they settle on their parameters. Use for drag interactions with momentum, elements that should feel "alive" (Apple's Dynamic Island), gestures interruptible mid-animation, decorative mouse-tracking. (Physics of springs in gesture-driven motion — velocity handoff, momentum projection, rubber-banding, decomposing 2D motion into X and Y — see [`PHYSICS.md`](PHYSICS.md); here is config.)
 
 ```js
 // Apple-style (easier to reason about) — recommended
@@ -104,7 +102,7 @@ For tooltip skip-delay-on-subsequent-hovers, `@starting-style` entry animation, 
 
 ## Accessibility
 
-`prefers-reduced-motion` means fewer and gentler animations, **not zero** — keep opacity and color transitions that aid comprehension, remove movement and position changes. Gate hover animations behind `@media (hover: hover) and (pointer: fine)` — touch devices trigger hover on tap, cause false positives. (Full three-signal reduced-motion model — `prefers-reduced-transparency`, `prefers-contrast`, vestibular specifics — see `motion-foundations`.) Non-motion accessibility floor (contrast, focus, responsive): see designer's USABILITY.md.
+`prefers-reduced-motion` means fewer and gentler animations, **not zero** — keep opacity and color transitions that aid comprehension, remove movement and position changes. Gate hover animations behind `@media (hover: hover) and (pointer: fine)` — touch devices trigger hover on tap, cause false positives. (Full three-signal reduced-motion model — `prefers-reduced-transparency`, `prefers-contrast`, vestibular specifics — see [`PHYSICS.md`](PHYSICS.md).)
 
 ```css
 @media (prefers-reduced-motion: reduce) {

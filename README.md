@@ -1,6 +1,31 @@
 # CSS Pro
 
-A frontend design co-pilot for Claude Code: opinionated skills for design decisions, CSS mechanics, motion craft, and library picks. Covers raw CSS, custom properties, design tokens, motion, and accessibility.
+**Stops agents wrecking your CSS.**
+
+A Claude Code plugin that checks CSS as it is written. It catches defects that can be
+demonstrated — invalid values, declarations that silently do nothing, dead custom
+properties, accessibility failures — and says nothing about how your CSS should look.
+
+**It blocks writes.** Eight rules refuse a write outright, because a defect that never
+reaches disk is cheaper than one you argue about afterwards. Each blocking rule is
+provable from the edit alone. Everything less certain advises instead, capped at three
+findings per edit so the channel stays readable.
+
+**It makes no style decisions for you.** No house palette, no naming convention, no
+token taxonomy, no opinion on what looks templated. A plugin that ships taste makes every
+project that installs it look the same, and takes decisions away from the person who has
+to live with them. css-pro asserts only what can be shown wrong; the rest is yours.
+
+## Scope
+
+Raw CSS (`.css`, `.scss`, `.sass`, `.less`) and CSS-in-JS — styled-components, emotion,
+vanilla-extract, and inline `style={{ }}` objects in `.ts`/`.tsx`/`.js`/`.jsx`/`.vue`/
+`.svelte`.
+
+**Tailwind is not supported.** Tailwind has no declarations and no selectors, so almost
+none of these rules apply to it, and its own tooling already covers the equivalents. If
+your styling is Tailwind, this plugin will be silent — install it for the CSS you do
+write, or not at all.
 
 ## Install
 
@@ -9,42 +34,27 @@ A frontend design co-pilot for Claude Code: opinionated skills for design decisi
 /plugin install css-pro@css-pro
 ```
 
-Most skills auto-fire when their trigger matches your prompt. The three marked in the table below are user-invoked, and `/css <ask>` is the manual front door to route a request by hand.
-
-## Use
-
-```
-/css make this pricing page feel less AI-generated
-```
-
-Routes to `designer` for a redesign with a point of view.
-
-```
-/design-advisor quick
-```
-
-Slash-only codebase design audit → prioritized findings and fix plans for another agent to execute.
-
-Asking "what should I use for toasts?" auto-fires `pick-ui-library` for a curated React-ecosystem pick.
+The checks run automatically. There is nothing to invoke.
 
 ## Skills
 
-| Skill                                                    | What it does                                                                       |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| [css](skills/css/SKILL.md)                               | front-door router (slash: `/css <ask>`), user-invoked only (slash-only)            |
-| [designer](skills/designer/SKILL.md)                     | design decisions: identity, tokens, states, accessibility floor, de-slopping       |
-| [prototype](skills/prototype/SKILL.md)                   | compare live UI variants via `?variant=` switcher                                  |
-| [css-craft](skills/css-craft/SKILL.md)                   | custom properties, `var()`, shorthand; maintainable CSS mechanics                  |
-| [css-functions](skills/css-functions/SKILL.md)           | choosing CSS value functions (`clamp`, `color-mix`, `anchor`, …) and their gotchas |
-| [motion-craft](skills/motion-craft/SKILL.md)             | whether/how to animate; easing, duration, origin; motion diff review               |
-| [motion-foundations](skills/motion-foundations/SKILL.md) | naming effects; physics of how motion should feel                                  |
-| [motion-advisor](skills/motion-advisor/SKILL.md)         | codebase-wide motion audit/discovery, outputs plans (slash-only)                   |
-| [design-advisor](skills/design-advisor/SKILL.md)         | codebase-wide design audit, outputs plans (slash-only)                             |
-| [pick-ui-library](skills/pick-ui-library/SKILL.md)       | curated React-ecosystem library picks                                              |
+Two, both loaded by Claude when relevant. They are reference for how CSS behaves — the
+enforcement lives in the hook, not here.
 
-## How it fits together
+| Skill                                        | What it covers                                                                                     |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| [css-craft](skills/css-craft/SKILL.md)       | custom properties and `var()`, shorthand and the reset trap, intrinsic layout, CSS value functions |
+| [motion-craft](skills/motion-craft/SKILL.md) | whether and how to animate; easing, duration, origin; effect vocabulary and the physics of feel    |
 
-`css` routes a request to the right skill in the right order. `designer` decides what the UI should be; `css-craft` and `css-functions` write those decisions as maintainable CSS; the `motion-*` skills handle whether and how things move. `design-advisor` and `motion-advisor` are read-only codebase audits that hand prioritized plans to any executor agent.
+## Development
+
+```
+node hooks/rules.test.mjs
+```
+
+Each rule has a defect that must fire and near-misses that must not. The near-misses are
+the point: a rule that fires on a comment, or on legitimate CSS, is worse than no rule.
+A blocking rule that produces a single false positive is demoted to an advisory.
 
 ## License
 
