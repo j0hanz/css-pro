@@ -9,19 +9,19 @@
 import { extname } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { text } from 'node:stream/consumers';
-import { strip } from './strip.mjs';
+import { prepare } from './strip.mjs';
 import { BLOCK, ADVISE } from './rules.mjs';
 
 const MODE = process.argv[2];
 const ADVISORY_CAP = 3;
 
 const STYLESHEET = /\.(css|scss|sass|less)$/i;
-const HOST = /\.([cm]?[jt]sx?|vue|svelte)$/i;
+const HOST = /\.([cm]?[jt]sx?|vue|svelte|astro|html?)$/i;
 
 // In a .tsx file almost nothing is CSS. Engage only where styling actually lives, so
 // the common case costs one regex and an exit.
 const STYLE_MARKERS =
-  /(?:styled|css|keyframes|createGlobalStyle)\s*[.(`]|style\s*=\s*\{\{|createStyles\s*\(|\bstyle\s*\(\s*\{/;
+  /(?:styled|css|keyframes|createGlobalStyle)\s*[.(`]|(?:style|css|sx)\s*=\s*\{\{|createStyles\s*\(|\bstyle\s*\(\s*\{|<style[\s>]|\bstyle\s*=\s*["']/;
 
 function addedText({ tool_name, tool_input = {} }) {
   if (tool_name === 'Write') return tool_input.content ?? '';
@@ -31,9 +31,10 @@ function addedText({ tool_name, tool_input = {} }) {
   return '';
 }
 
-function run(rules, added, readFile) {
+function run(rules, added, readFile, path) {
   const hits = [];
   for (const rule of rules) {
+    if (rule.files && !rule.files.test(path)) continue;
     if (rule.fn) {
       if (rule.fn(added)) hits.push(rule.msg);
       continue;
@@ -63,13 +64,13 @@ try {
   if (!raw) process.exit(0);
   if (!isSheet && !STYLE_MARKERS.test(raw)) process.exit(0);
 
-  const added = strip(raw, path);
+  const added = prepare(raw, path);
 
   let cached;
   const readFile = () => {
     if (cached === undefined) {
       try {
-        cached = strip(readFileSync(path, 'utf8'), path);
+        cached = prepare(readFileSync(path, 'utf8'), path);
       } catch {
         cached = null; // unreadable, or not on disk yet for a pre-write Write
       }
@@ -81,7 +82,7 @@ try {
   // write is async — exiting on the next line truncates it, and a truncated deny is an
   // allow. The process ends on its own once stdin is drained.
   if (MODE === 'pre') {
-    const blocks = run(BLOCK, added, readFile);
+    const blocks = run(BLOCK, added, readFile, path);
     if (blocks.length) {
       process.stdout.write(
         JSON.stringify({
@@ -97,7 +98,7 @@ try {
       );
     }
   } else {
-    const advisories = run(ADVISE, added, readFile);
+    const advisories = run(ADVISE, added, readFile, path);
     if (advisories.length) {
       const shown = advisories.slice(0, ADVISORY_CAP);
       const withheld = advisories.length - shown.length;

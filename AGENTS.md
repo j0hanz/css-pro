@@ -15,7 +15,10 @@ positives; everything else goes in `ADVISE`. A single false positive demotes a b
 rule to an advisory.
 
 Rule patterns are matched against comment- and string-stripped text — do not write
-comment handling into a regex.
+comment handling into a regex. Object-form CSS-in-JS and markup files are reduced to
+synthetic `x{ ... }` declaration blocks by `hooks/strip.mjs`, so rules see plain
+declarations either way. A rule that should run only on some file types takes a
+`files` regex.
 
 ## Verifying
 

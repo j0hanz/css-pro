@@ -3,7 +3,7 @@
   "name": "css-pro",
   "displayName": "CSS Pro",
   "version": "0.3.0",
-  "description": "Stops agents wrecking your CSS. Checks CSS as it is written and refuses writes carrying provable defects — invalid values, declarations that silently do nothing, dead custom properties, accessibility failures. Raw CSS and CSS-in-JS; makes no style decisions for you.",
+  "description": "Stops agents wrecking your CSS. Checks CSS as it is written: refuses writes carrying defects provable from the edit alone — invalid values, declarations that silently do nothing — and advises on measurable performance and accessibility failures. Raw CSS, CSS-in-JS, and single-file component styles; makes no style decisions for you.",
   "author": {
     "name": "j0hanz",
     "email": "l.johansson93@outlook.com"

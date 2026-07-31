@@ -3,8 +3,9 @@
 **Stops agents wrecking your CSS.**
 
 A Claude Code plugin that checks CSS as it is written. It catches defects that can be
-demonstrated — invalid values, declarations that silently do nothing, dead custom
-properties, accessibility failures — and says nothing about how your CSS should look.
+demonstrated — invalid values, declarations that silently do nothing, measurable
+performance traps, accessibility failures — and says nothing about how your CSS should
+look.
 
 **It blocks writes.** Eight rules refuse a write outright, because a defect that never
 reaches disk is cheaper than one you argue about afterwards. Each blocking rule is
@@ -18,9 +19,13 @@ to live with them. css-pro asserts only what can be shown wrong; the rest is you
 
 ## Scope
 
-Raw CSS (`.css`, `.scss`, `.sass`, `.less`) and CSS-in-JS — styled-components, emotion,
-vanilla-extract, and inline `style={{ }}` objects in `.ts`/`.tsx`/`.js`/`.jsx`/`.vue`/
-`.svelte`.
+Raw CSS (`.css`, `.scss`, `.sass`, `.less`) and CSS-in-JS in `.js`/`.jsx`/`.ts`/`.tsx` —
+styled-components and emotion in both template and object form, vanilla-extract,
+MUI `sx`, and inline `style={{ }}` objects. In `.vue`, `.svelte`, `.astro`, and `.html`
+the hook reads `<style>` blocks, `style=""` attributes, and CSS-in-JS inside `<script>`.
+
+Object values it cannot read statically — template literals, ternaries, variables — are
+skipped, not guessed at.
 
 **Tailwind is not supported.** Tailwind has no declarations and no selectors, so almost
 none of these rules apply to it, and its own tooling already covers the equivalents. If

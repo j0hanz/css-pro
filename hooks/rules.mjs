@@ -4,6 +4,8 @@
 // The regex is tested against the added CSS, and if it matches, the message is reported.
 // Some rules have a `when` array of regexes that must all match, and an `absent` regex that must not match.
 // Some rules have a `fn` function that takes the added CSS and returns true if the rule is violated.
+// A rule with a `files` regex runs only on paths it matches.
+// ADVISE is ordered by severity: the runtime shows the first three hits and withholds the rest.
 
 export const BLOCK = [
   {
@@ -40,9 +42,6 @@ export const BLOCK = [
     msg: '`oklch()` and `oklab()` lightness is 0–1, or a percentage. A bare value above 1 silently clamps and gives you the wrong colour.',
   },
   {
-    // `background: url("data:image/svg+xml,<svg ...>")` is a common pattern, but the
-    // SVG may contain `</style>` or `</script>` which closes the CSS block and injects
-    // HTML. This is a security risk if the SVG is user-supplied. The only safe way to
     id: 'longhand-before-shorthand',
     re: /(?<![\w-])(background|font|border)(?!-[a-z-]*(?:radius|collapse|spacing|blend-mode|smooth(?:ing)?)\b)-[a-z-]+\s*:[^{}]*;[^{}]*(?<![\w-])\1\s*:/i,
     msg: 'A longhand set before its shorthand is discarded — the shorthand resets every longhand it omits. Fold it in, or move it after.',
@@ -56,9 +55,10 @@ export const BLOCK = [
 
 export const ADVISE = [
   {
-    id: 'viewport-height-unit',
-    re: /(?<![\w-])(?:min-|max-)?height\s*:\s*100vh\b/i,
-    msg: '`100vh` does not account for mobile browser chrome, so the element overflows and jumps as the address bar hides. `100dvh` tracks the visible viewport.',
+    id: 'outline-none-without-focus-visible',
+    when: [/outline\s*:\s*(?:none|0)\b/i],
+    absent: /:focus-visible/i,
+    msg: 'Removing the outline with no `:focus-visible` in this file leaves keyboard users with no visible focus (WCAG 2.4.7). Replace it, do not just remove it.',
   },
   {
     id: 'motion-without-reduced-motion',
@@ -70,16 +70,20 @@ export const ADVISE = [
     msg: 'Motion added with no `prefers-reduced-motion` in this file (WCAG 2.3.3). Fewer and gentler, not none — keep fades, drop movement. Ignore if handled globally.',
   },
   {
+    id: 'infinite-animation',
+    re: /(?<![\w-])animation(?:-iteration-count)?\s*:[^;{}]*(?<![\w-])infinite\b/i,
+    msg: 'An animation that repeats forever falls under WCAG 2.2.2: moving content past five seconds needs a way to pause, stop, or hide it. Brief loading indicators that leave on their own are fine.',
+  },
+  {
+    id: 'visual-order-diverges-from-dom',
+    fn: visualReorder,
+    msg: 'Visual order now differs from DOM order, so keyboard and screen-reader users get a different sequence (WCAG 1.3.2, 2.4.3). Confirm focus order still reads correctly — this may be entirely correct.',
+  },
+  {
     id: 'hover-motion-ungated',
     when: [/:hover[^{}]*\{[^{}]*transform\s*:/i],
     absent: /@media[^{]*\bhover\s*:\s*hover/i,
     msg: 'Touch devices fire `:hover` on tap, so this motion plays on every touch and sticks. Gate with `@media (hover: hover) and (pointer: fine)`. Ignore if gated globally.',
-  },
-  {
-    id: 'outline-none-without-focus-visible',
-    when: [/outline\s*:\s*(?:none|0)\b/i],
-    absent: /:focus-visible/i,
-    msg: 'Removing the outline with no `:focus-visible` in this file leaves keyboard users with no visible focus (WCAG 2.4.7). Replace it, do not just remove it.',
   },
   {
     id: 'light-dark-without-color-scheme',
@@ -88,9 +92,31 @@ export const ADVISE = [
     msg: '`light-dark()` needs `color-scheme` to resolve; without it the first argument wins permanently. Ignore if set globally.',
   },
   {
-    id: 'visual-order-diverges-from-dom',
-    fn: visualReorder,
-    msg: 'Visual order now differs from DOM order, so keyboard and screen-reader users get a different sequence (WCAG 1.3.2, 2.4.3). Confirm focus order still reads correctly — this may be entirely correct.',
+    id: 'viewport-height-unit',
+    re: /(?<![\w-])(?:min-|max-)?height\s*:\s*100vh\b/i,
+    msg: '`100vh` does not account for mobile browser chrome, so the element overflows and jumps as the address bar hides. `100dvh` tracks the visible viewport.',
+  },
+  {
+    id: 'viewport-width-unit',
+    re: /(?<![\w-])(?:min-|max-)?width\s*:\s*100vw\b/i,
+    msg: '`100vw` includes the space under a classic scrollbar, so any page with a vertical scrollbar overflows horizontally. `100%` of the containing block does not.',
+  },
+  {
+    id: 'transition-box-shadow',
+    re: /(?<![\w-])transition(?:-property)?\s*:[^;{}]*(?<![-\w])box-shadow\b/i,
+    msg: 'Transitioning `box-shadow` repaints the element on every frame. Put the shadow on a pseudo-element and transition its `opacity` instead.',
+  },
+  {
+    id: 'will-change-overbroad',
+    re: /will-change\s*:[^;{}]*,[^;{}]*,/i,
+    msg: '`will-change` listing three or more properties asks the browser to keep every one optimisation-ready, which holds memory and can be slower than no hint. Hint only what actually animates.',
+  },
+  {
+    // Preprocessor @import compiles away; only plain CSS pays at runtime.
+    id: 'import-in-css',
+    files: /\.css$/i,
+    re: /@import\b/i,
+    msg: '`@import` is discovered only after this sheet downloads, then fetched serially, delaying first paint. Use another `<link>`, or ignore if a bundler inlines it.',
   },
 ];
 
