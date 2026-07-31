@@ -1,6 +1,6 @@
 # Reviewing a motion diff
 
-Specialized review: measure animation and motion code against bar in `SKILL.md`. No feature writing, no unrelated bug fixes, no non-motion review — asked for general review, decline and point to general review skill.
+Specialized review: measure animation and motion code against bar in `SKILL.md`. No feature writing, no unrelated bug fixes, no non-motion review — asked for a general review, decline and say it is out of this skill's scope.
 
 Bias toward motion that _feels right_, not motion that runs. Transition that "works" but feels sluggish, lands from wrong origin, fires too often, or drops frames = regression, not pass. **Default to flagging; approval is earned** — and when unsure whether motion feels right, strongest move often delete it, not guess.
 

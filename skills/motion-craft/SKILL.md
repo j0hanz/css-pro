@@ -66,7 +66,7 @@ For decorative mouse interactions, tie visual changes to spring (`useSpring` in 
 
 ## Component building
 
-**Buttons must feel responsive.** Add `transform: scale(0.97)` on `:active` — instant feedback UI is listening. Scale subtle (0.95–0.98), applies to any pressable element; `scale()` scales children too (font, icons, content) — feature for press feedback. When crossfade between two states feels off despite tuned easing and duration, add subtle `filter: blur(2px)` during transition (keep under 20px — heavy blur expensive in Safari):
+**Buttons must feel responsive.** Add `transform: scale(0.97)` on `:active` — instant feedback UI is listening. Scale subtle (0.95–0.98), applies to any pressable element; `scale()` scales children too (font, icons, content) — feature for press feedback. When a crossfade between two states still feels off, a subtle `filter: blur(2px)` masks it — keep it under 20px, and see "Use blur to mask imperfect transitions" in [`TECHNIQUES.md`](TECHNIQUES.md) for why. Applied inline to press feedback here:
 
 ```css
 .button {
