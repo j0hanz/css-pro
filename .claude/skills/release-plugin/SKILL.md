@@ -1,9 +1,9 @@
 ---
 name: release-plugin
-description: Use when cutting a new version release for the squads Claude Code plugin — version bump, tag, or GitHub release.
+description: Use when cutting a new version release for the css-pro Claude Code plugin — version bump, tag, or GitHub release.
 ---
 
-Version-bump-and-ship workflow for **this repo only** — squads is a Claude Code
+Version-bump-and-ship workflow for **this repo only** — css-pro is a Claude Code
 plugin, not an npm package.
 
 ## Files that carry the version (all 4, kept in sync)
