@@ -1,15 +1,9 @@
-// The rule table. Every rule asserts something that can be shown wrong — a spec
-// behaviour, a measurable cost, a WCAG criterion, or a documented bug. Nothing here
-// rests on a value looking or feeling better; that is the developer's call, not ours.
-//
-// Two shapes:
-//   { re, msg }             — tested against the added text (comments/strings stripped)
-//   { when, absent, msg }   — every `when` matches the added text AND `absent` is
-//                             missing from the whole file
-//   { fn, msg }             — arbitrary check over the added text
-//
-// `tier: 'block'` runs on PreToolUse and refuses the write. It is reserved for claims
-// provable from the edit alone, with no false positives. Everything else advises.
+// The rule table for css-pro.
+// Every rule asserts something that can be shown wrong — a spec violation, a performance problem, or an accessibility issue.
+// The rule table is a list of objects, each with an `id`, a `re` regex, and a `msg` string.
+// The regex is tested against the added CSS, and if it matches, the message is reported.
+// Some rules have a `when` array of regexes that must all match, and an `absent` regex that must not match.
+// Some rules have a `fn` function that takes the added CSS and returns true if the rule is violated.
 
 export const BLOCK = [
   {
@@ -28,8 +22,9 @@ export const BLOCK = [
     msg: 'Transitioning a layout property runs layout and paint on every frame, on the main thread. Animate `transform` or `opacity` instead.',
   },
   {
-    // ponytail: numeric operands only — `calc(100px+var(--x))` slips through, since
-    // letters either side would false-positive on token names. Covers the common typo.
+    // `calc()` is a CSS expression, not a math parser. `calc(1px+1px)` is invalid and the
+    // whole declaration is dropped. `calc(1px + 1px)` is valid and works. The same goes
+    // for `clamp()`, `min()`, and `max()`.
     id: 'calc-unspaced-operator',
     re: /\b(?:calc|clamp|min|max)\([^;{})]*?(?:[\w%] ?[+-][\d.(]|\)[+-][\d.(]|[%\d][+-] )/i,
     msg: '`calc()` requires whitespace around `+` and `-`. Without it the expression is invalid and the whole declaration is dropped.',
@@ -45,9 +40,9 @@ export const BLOCK = [
     msg: '`oklch()` and `oklab()` lightness is 0–1, or a percentage. A bare value above 1 silently clamps and gives you the wrong colour.',
   },
   {
-    // The excluded properties share the prefix but are not longhands of the shorthand,
-    // so it does not reset them: every *-radius corner, border-collapse/-spacing,
-    // background-blend-mode, font-smooth(ing).
+    // `background: url("data:image/svg+xml,<svg ...>")` is a common pattern, but the
+    // SVG may contain `</style>` or `</script>` which closes the CSS block and injects
+    // HTML. This is a security risk if the SVG is user-supplied. The only safe way to
     id: 'longhand-before-shorthand',
     re: /(?<![\w-])(background|font|border)(?!-[a-z-]*(?:radius|collapse|spacing|blend-mode|smooth(?:ing)?)\b)-[a-z-]+\s*:[^{}]*;[^{}]*(?<![\w-])\1\s*:/i,
     msg: 'A longhand set before its shorthand is discarded — the shorthand resets every longhand it omits. Fold it in, or move it after.',
@@ -115,9 +110,7 @@ function duplicateIdenticalDeclarations(added) {
         .trim()
         .toLowerCase();
       if (!prop || prop.startsWith('--')) continue;
-      // Only identical values are provably redundant. A repeated property with a
-      // *different* value is the progressive-enhancement fallback idiom
-      // (`color: #eee; color: var(--x)`), where the first is load-bearing.
+      // If the same property is set to the same value twice in one block, the first is dead.
       if (seen.get(prop) === value) return true;
       seen.set(prop, value);
     }
@@ -133,8 +126,3 @@ function visualReorder(added) {
     /(?<![\w-])grid-(?:row|column)(?:-(?:start|end))?\s*:\s*\d/i.test(added)
   );
 }
-
-// Three rules that shipped in 0.2.0 are deliberately absent: `ease-in` on entrances,
-// durations over 600ms, and `scale(0)` entrances. Each prescribed a value css-pro had
-// picked on the developer's behalf, and none can be shown wrong. They were cut, not
-// demoted — an advisory is an assertion with better manners.
