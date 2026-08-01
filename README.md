@@ -66,9 +66,10 @@ write, or not at all.
 /plugin install css-pro@css-pro
 ```
 
-The checks run automatically. There is nothing to invoke. They need `node` on your `PATH`
-and nothing else — no bash, no `jq`, so they behave the same under Git Bash, PowerShell
-and a POSIX shell. Without `node` the hooks report an error and no write is ever blocked.
+The checks run automatically. There is nothing to invoke. They need `node` 18 or newer on
+your `PATH` and nothing else — no bash, no `jq`, so they behave the same under Git Bash,
+PowerShell and a POSIX shell. Without `node` the hooks report an error and no write is
+ever blocked.
 The turn-end sweep also asks `git` what changed; outside a repository, or with no `git`,
 that sweep stays silent and every per-edit check is unaffected.
 

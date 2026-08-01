@@ -3,6 +3,9 @@
   "version": "0.7.0",
   "private": true,
   "description": "Claude Code plugin that stops agents wrecking your CSS.",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "format": "prettier --write ."
   },

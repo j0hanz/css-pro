@@ -1,4 +1,30 @@
-export const AUDITABLE = /\.(css|scss|sass|less|[cm]?[jt]sx?|vue|svelte|astro|html?)$/i;
+const EXTS = [
+  'css',
+  'scss',
+  'sass',
+  'less',
+  'js',
+  'jsx',
+  'cjs',
+  'cjsx',
+  'mjs',
+  'mjsx',
+  'ts',
+  'tsx',
+  'cts',
+  'ctsx',
+  'mts',
+  'mtsx',
+  'vue',
+  'svelte',
+  'astro',
+  'html',
+  'htm',
+];
+
+export const AUDITABLE = new RegExp(`\\.(?:${EXTS.join('|')})$`, 'i');
+
+export const AUDITABLE_GLOBS = EXTS.map((e) => `*.${e}`);
 
 export const DIFF_ARGS = ['diff', '-U0', '--no-color', '--no-ext-diff'];
 
