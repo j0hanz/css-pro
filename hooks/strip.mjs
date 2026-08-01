@@ -54,6 +54,34 @@ function stripComments(text, lineComments) {
       i = stop;
       continue;
     }
+    // SCSS/Sass interpolation `#{...}` is not CSS: its `{`/`}` would read as block
+    // delimiters and rule regexes would fire on the expression. Blank it like a
+    // comment, newlines preserved. Depth-aware so nested `{}` inside the expression
+    // (e.g. a map literal) does not terminate it early; strings inside are skipped.
+    if (c === '#' && next === '{') {
+      let depth = 1;
+      let k = i + 2;
+      while (k < text.length) {
+        const ch = text[k];
+        if (ch === '"' || ch === "'") {
+          k = skipString(text, k);
+          continue;
+        }
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            k++;
+            break;
+          }
+        }
+        k++;
+      }
+      const stop = depth === 0 ? k : text.length;
+      out += blank(text.slice(i, stop));
+      i = stop;
+      continue;
+    }
     if (lineComments && c === '/' && next === '/') {
       const end = text.indexOf('\n', i);
       const stop = end === -1 ? text.length : end;
