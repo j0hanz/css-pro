@@ -114,9 +114,5 @@ try {
     }
   }
 } catch (e) {
-  // A broken hook must never be the reason someone cannot edit a stylesheet.
-  // Falling out of the catch exits 0 without truncating a partial write. stderr on a
-  // zero exit reaches `claude --debug` and nothing else, so a broken rule is findable
-  // rather than invisible, and still costs no one an edit.
   console.error(e);
 }
