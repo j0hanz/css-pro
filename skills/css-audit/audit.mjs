@@ -26,6 +26,9 @@ import { prepare } from '../../hooks/strip.mjs';
 import { BLOCK, ADVISE } from '../../hooks/rules.mjs';
 
 const STYLESHEET = /\.(css|scss|sass|less)$/i;
+// A path the shell left unexpanded. Not global: `.test` on a /g regex carries lastIndex
+// between calls and would skip every other argument.
+const GLOB = /[*?[\]{}]/;
 // Indented Sass (.sass) has no braces, so the brace-driven parseRules yields
 // nothing and the empty/duplicate rule checks skip it. Used to flag that honestly.
 const SASS_INDENTED = /\.sass$/i;
@@ -555,8 +558,8 @@ function main(args) {
   // sheet with an empty rule and a dead token in it, so `--strict` makes every finding
   // gate — the SKILL's "Done when" made checkable.
   const strict = args.includes('--strict');
-  args = args.filter((a) => a !== '--strict');
-  if (args.length === 0) {
+  const argv = args.filter((a) => a !== '--strict');
+  if (argv.length === 0) {
     console.log('css-pro audit: no files given; running self-test.\n');
     return selfTest();
   }
@@ -566,13 +569,13 @@ function main(args) {
   // gate that audits nothing must fail, not pass.
   // fs.globSync arrived in Node 22. Fail with instructions rather than a
   // TypeError — or worse, a silent skip — when the host Node is older.
-  if (args.some((a) => /[*?[\]{}]/.test(a)) && typeof fs.globSync !== 'function') {
+  if (argv.some((a) => GLOB.test(a)) && typeof fs.globSync !== 'function') {
     console.log('Glob arguments need Node 22 or newer; pass explicit file paths instead.');
     return 1;
   }
   let failed = 0;
-  args = args.flatMap((a) => {
-    if (!/[*?[\]{}]/.test(a)) return a;
+  const paths = argv.flatMap((a) => {
+    if (!GLOB.test(a)) return a;
     const hits = fs.globSync(a);
     if (hits.length === 0) {
       console.log(`== ${a} ==\n  (skipped: glob matched nothing)`);
@@ -585,7 +588,7 @@ function main(args) {
   // NOT resolved here — they span files, so a prop used only in a sibling sheet
   // would be false-flagged unused/undefined. Phase 2 resolves them together.
   const results = [];
-  for (const path of args) {
+  for (const path of paths) {
     if (!STYLESHEET.test(path)) {
       console.log(
         `== ${path} ==\n  (skipped: audit targets .css/.scss/.sass/.less; the per-edit hook covers edits to other files)`,
