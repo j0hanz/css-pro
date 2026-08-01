@@ -288,6 +288,7 @@ function selfTest() {
     '.z2 { border-inline-start: 3px solid red; border-radius: 0 4px 4px 0; }',
     '.z3 { border-inline-start: 3px solid red; border-radius: 4px; }',
     '.z4 { grid-column: 1 / -1; }',
+    '.cb { width: calc(var(--used) -8px); }',
   ].join('\n');
   const prepared = prepare(src, 'test.css');
   const lineOf = makeLineLookup(prepared);
@@ -407,6 +408,10 @@ function selfTest() {
     [
       'BLOCK: no false calc() on a custom property with a -digit tail',
       !has(block, 'whitespace') || !block.some((f) => f.line === 26),
+    ],
+    [
+      'BLOCK catches calc() missing trailing space after a ) operand',
+      block.some((f) => f.line === 30 && /whitespace/.test(f.msg)),
     ],
     ['every BLOCK finding carries a line', block.every((f) => f.line != null)],
     ['every ADVISE finding carries a line', advise.every((f) => f.line != null)],

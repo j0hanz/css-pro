@@ -136,7 +136,7 @@ const found = (at) => (at.length ? at : null);
 // named `--s-1`, `--space-4`, `--z-10` made a valid `calc()` look malformed and the rule
 // refused the write.
 const MATH_NO_SPACE =
-  /\b(?:calc|clamp|min|max)\([^;{})]*?(?:[\w%] ?[+-][\d.(]|\)[+-][\d.(]|[%\d][+-] )/gi;
+  /\b(?:calc|clamp|min|max)\([^;{})]*?(?:[\w%] ?[+-][\d.(]|\) ?[+-][\d.(]|[%\d][+-] )/gi;
 const blankCustomIdents = (s) => s.replace(/--[\w-]+/g, (m) => '_'.repeat(m.length));
 
 function mathWhitespace(added) {
