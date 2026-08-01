@@ -13,7 +13,7 @@ The per-edit hook only checks the lines you touch, so a stylesheet accretes defe
 node "${CLAUDE_PLUGIN_ROOT}/skills/css-audit/audit.mjs" <file.css>...
 ```
 
-Pass every stylesheet (`.css`/`.scss`/`.sass`/`.less`); globs expand inside the script, so any enumeration of the project's CSS works in any shell. Prints `file:line` findings grouped by severity, uncapped, then a count; exits non-zero if any provable (BLOCK) defect remains. No arguments runs the self-test.
+Pass every stylesheet (`.css`/`.scss`/`.sass`/`.less`); globs expand inside the script, so any enumeration of the project's CSS works in any shell. Globs need Node 22+; a glob matching nothing or an unreadable file exits non-zero — a gate that audits nothing fails instead of passing. Prints `file:line` findings grouped by severity, uncapped, then a count; exits non-zero if any provable (BLOCK) defect remains. No arguments runs the self-test.
 
 **Done when** every target file has been re-run and is clean, or carries only items kept on purpose — every remaining BLOCK a `file:line` with its keep-reason. ADVISE and whole-file findings are reported, not gated; each confirmed intentional, else fixed.
 
