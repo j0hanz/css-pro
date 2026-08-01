@@ -12,6 +12,14 @@ reaches disk is cheaper than one you argue about afterwards. Each blocking rule 
 provable from the edit alone. Everything less certain advises instead, capped at three
 findings per edit so the channel stays readable.
 
+**It sweeps once more at the end of a turn.** The per-edit check reads the text of one
+write, which leaves two things it cannot see. CSS that reached disk another way — a shell
+heredoc, `sed`, a generator, a formatter — was never offered to it. And a defect only
+provable against the whole block, such as a declaration added onto a block that already
+carries it, reads as clean in the added lines alone. So at turn end the same eight rules
+run over the files `git` reports as changed, reporting only what lands on a changed line;
+nothing pre-existing is dragged in, and a finding is reported once, not once per turn.
+
 **The hook makes no style decisions for you.** No house palette, no naming convention, no
 token taxonomy, no opinion on what looks templated. A check that ships taste makes every
 project that installs it look the same, and takes decisions away from the person who has
@@ -44,6 +52,8 @@ write, or not at all.
 The checks run automatically. There is nothing to invoke. They need `node` on your `PATH`
 and nothing else — no bash, no `jq`, so they behave the same under Git Bash, PowerShell
 and a POSIX shell. Without `node` the hooks report an error and no write is ever blocked.
+The turn-end sweep also asks `git` what changed; outside a repository, or with no `git`,
+that sweep stays silent and every per-edit check is unaffected.
 
 ## Skills
 
