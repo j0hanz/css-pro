@@ -77,7 +77,7 @@ function parseRules(text, lineOf) {
     const head = tail.trim();
     const lead = tail.match(/^\s*/)[0].length;
     const line = lineOf(start + stmt + lead);
-    const sel = prefix ? `${prefix} ${head}` : head;
+    const sel = prefix ? (head ? `${prefix} ${head}` : prefix) : head;
     const cond = head.startsWith('@') ? (atRules ? `${atRules} ${head}` : head) : atRules;
     i++;
     let body = '';
@@ -96,7 +96,14 @@ function parseRules(text, lineOf) {
       body += semi >= 0 ? seg.slice(0, semi + 1) : '';
       const nestedSel = (semi >= 0 ? seg.slice(semi + 1) : seg).trim();
       i = j;
-      block(nestedSel ? `${sel} ${nestedSel}` : sel, cond);
+      // A nested at-rule is a condition, not a selector. Folded into the selector it
+      // left the context empty, so a block inside `@media` keyed identically to one
+      // outside it and the two read as repeated declarations.
+      const nestedAt = nestedSel.startsWith('@');
+      block(
+        nestedAt || !nestedSel ? sel : `${sel} ${nestedSel}`,
+        nestedAt ? (cond ? `${cond} ${nestedSel}` : nestedSel) : cond,
+      );
     }
     if (hasNested ? body.replace(/[;\s]/g, '') !== '' : true)
       out.push({ selector: sel, context: cond ?? '', body, line });
