@@ -21,7 +21,7 @@ Custom properties resolve only across the files passed in one run. Audit a singl
 
 ### Read the output
 
-Three groups, highest impact first. BLOCK and ADVISE messages are full sentences from the rule table — read them as written.
+Three groups, highest impact first. BLOCK and ADVISE messages are full sentences from the rule table — read them as written. Each line is `path:line,...  message`, line-sorted; a message that fires on several lines collapses to one line listing every site (`path:8,33-34  message`), so a sheet with fifteen `calc()` defects shows one line, not fifteen. The trailing count is defect occurrences, not displayed lines — a grouped line still counts each site.
 
 **BLOCK** — provable from the file alone; what the hook blocks on a write. Fix these.
 

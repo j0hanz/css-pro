@@ -225,8 +225,45 @@ function auditFile(path) {
   };
 }
 
-function format(path, f) {
-  return f.line == null ? `  ${f.msg}` : `  ${path}:${f.line}  ${f.msg}`;
+// Collapse a sorted line set into compact ranges: [8,33,34] -> "8,33-34".
+// Precondition: `lines` is non-empty — callers guard on `lines.size`.
+function lineList(lines) {
+  if (!lines.size) return '';
+  const s = [...lines].sort((a, b) => a - b);
+  const runs = [];
+  let start = s[0],
+    prev = s[0];
+  for (let i = 1; i <= s.length; i++) {
+    if (i < s.length && s[i] === prev + 1) {
+      prev = s[i];
+      continue;
+    }
+    runs.push(start === prev ? `${start}` : `${start}-${prev}`);
+    start = prev = s[i];
+  }
+  return runs.join(',');
+}
+
+// One line per distinct message: `path:line,line,...  message`. Findings are
+// line-sorted and repeated messages collapse to a single line listing every
+// site — a sheet with fifteen `calc()` defects reads as one line, not fifteen.
+function formatGroup(path, findings) {
+  // Finite sentinel, not Infinity: Infinity - Infinity is NaN, which leaves the
+  // order of null-line findings spec-unstable. MAX_SAFE_INTEGER sorts them last.
+  const TAIL = Number.MAX_SAFE_INTEGER;
+  const ordered = [...findings].sort((a, b) => (a.line ?? TAIL) - (b.line ?? TAIL));
+  // Group by message — safe because every rule in the table has a unique msg.
+  const byMsg = new Map();
+  for (const f of ordered) {
+    if (!byMsg.has(f.msg)) byMsg.set(f.msg, new Set());
+    if (f.line != null) byMsg.get(f.msg).add(f.line);
+  }
+  const out = [];
+  for (const [msg, lines] of byMsg) {
+    const loc = lines.size ? `${path}:${lineList(lines)}` : '';
+    out.push(loc ? `  ${loc}  ${msg}` : `  ${msg}`);
+  }
+  return out;
 }
 
 const SASS_NOTE =
@@ -248,7 +285,7 @@ function report(r) {
   console.log(groups.length ? `== ${path} ==` : `== ${path} ==  clean`);
   for (const [key, heading] of groups) {
     console.log(heading);
-    for (const f of r[key]) console.log(format(path, f));
+    for (const line of formatGroup(path, r[key])) console.log(line);
   }
   if (mix)
     console.log(
