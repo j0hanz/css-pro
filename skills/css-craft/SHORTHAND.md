@@ -51,6 +51,40 @@ Sides, corners use _same_ 1/2/3/4 pattern, different start points — sides top,
 
 `/` splits horizontal from vertical radii, elliptical corners: `border-radius: 50% / 25%` = 50% horizontal, 25% vertical.
 
+## Logical box sides — and the corner that does not follow
+
+Every box-side shorthand has a logical twin that maps to writing direction instead of screen edges. `margin-block` / `margin-inline`, `padding-block` / `padding-inline`, `border-block` / `border-inline`, `inset-block` / `inset-inline`. Two values only — start then end — because each names one axis:
+
+| Physical                | Logical (horizontal-tb, LTR)            |
+| ----------------------- | --------------------------------------- |
+| `margin: 1em 2em`       | `margin-block: 1em; margin-inline: 2em` |
+| `padding-left: 1em`     | `padding-inline-start: 1em`             |
+| `border-top: 2px solid` | `border-block-start: 2px solid`         |
+| `top: 0; bottom: 0`     | `inset-block: 0`                        |
+
+`inset` itself is **physical** TRBL despite the name — `inset-block` / `inset-inline` are the logical ones.
+
+**`border-radius` corners are physical, and there is no logical shorthand for them.** This is the trap: `border-inline-start` flips to the right edge under `direction: rtl`, and `border-radius: 0 1em 1em 0` does not move at all. A rail on one side with square corners on the other is the result, in exactly the component where someone reached for logical properties on purpose. The per-corner logical longhands exist — use them:
+
+```css
+/* Breaks in RTL: the rail flips, the corners do not. */
+.callout {
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* Holds: both follow writing direction. */
+.callout {
+  border-inline-start: 3px solid var(--accent);
+  border-start-end-radius: var(--radius);
+  border-end-end-radius: var(--radius);
+}
+```
+
+Corner longhands read `border-<block>-<inline>-radius`: `border-start-start-radius`, `border-start-end-radius`, `border-end-start-radius`, `border-end-end-radius`. A uniform `border-radius: 1em` is direction-agnostic and needs none of this.
+
+Mixing the two families is not itself a bug — `border-block-start` and `border-top` are the same edge in horizontal-tb. It bites in two places: RTL, where the inline axis flips, and vertical writing modes, where block and inline swap entirely. So a physical override of a logically-set edge (`h2 { border-block-start: … }` then `h2:first-of-type { border-top: none }`) resets nothing under `writing-mode: vertical-rl`.
+
 ## The `/` separator
 
 Several shorthands use `/` split two value groups:

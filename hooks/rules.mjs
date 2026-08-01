@@ -3,7 +3,10 @@
 // The rule table is a list of objects, each with a `re` regex and a `msg` string.
 // The regex is tested against the added CSS, and if it matches, the message is reported.
 // Some rules have a `when` array of regexes that must all match, and an `absent` regex that must not match.
-// Some rules have a `fn` function that takes the added CSS and returns true if the rule is violated.
+// Some rules have a `fn` function that takes the added CSS and returns either `null` (clean)
+// or a NON-EMPTY array of match indices — never `[]`, which is truthy and would report a
+// clean file. The indices let the whole-file audit print `file:line` for every occurrence;
+// the per-edit hook only needs the truthiness.
 // A rule with a `files` regex runs only on paths it matches.
 // ADVISE is ordered by severity: the runtime shows the first three hits and withholds the rest.
 
@@ -24,7 +27,7 @@ export const BLOCK = [
     // `calc()` is a CSS expression, not a math parser. `calc(1px+1px)` is invalid and the
     // whole declaration is dropped. `calc(1px + 1px)` is valid and works. The same goes
     // for `clamp()`, `min()`, and `max()`.
-    re: /\b(?:calc|clamp|min|max)\([^;{})]*?(?:[\w%] ?[+-][\d.(]|\)[+-][\d.(]|[%\d][+-] )/i,
+    fn: mathWhitespace,
     msg: '`calc()` requires whitespace around `+` and `-`. Without it the expression is invalid and the whole declaration is dropped.',
   },
   {
@@ -60,6 +63,14 @@ export const ADVISE = [
     msg: 'Motion added with no `prefers-reduced-motion` in this file (WCAG 2.3.3). Fewer and gentler, not none — keep fades, drop movement. Ignore if handled globally.',
   },
   {
+    // Not reachable by the rule above: smooth scrolling carries no @keyframes, no
+    // transition, and no transform token, yet it is interaction-triggered movement of
+    // the whole viewport — the most common unguarded vestibular trigger in a stylesheet.
+    when: [/scroll-behavior\s*:\s*smooth/i],
+    absent: /prefers-reduced-motion/i,
+    msg: 'Smooth scrolling is interaction-triggered movement of the whole viewport (WCAG 2.3.3) and a common vestibular trigger. Add `@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto } }`. Ignore if handled globally.',
+  },
+  {
     re: /(?<![\w-])animation(?:-iteration-count)?\s*:[^;{}]*(?<![\w-])infinite\b/i,
     msg: 'An animation that repeats forever falls under WCAG 2.2.2: moving content past five seconds needs a way to pause, stop, or hide it. Brief loading indicators that leave on their own are fine.',
   },
@@ -90,6 +101,10 @@ export const ADVISE = [
     msg: 'Transitioning `box-shadow` repaints the element on every frame. Put the shadow on a pseudo-element and transition its `opacity` instead.',
   },
   {
+    fn: directionBlindRadius,
+    msg: 'This block sets a logical inline edge but a `border-radius` whose left and right corners differ. The edge flips in RTL, the corners do not, so the rail and the square corners end up on opposite sides. Use `border-start-start-radius` / `border-end-start-radius`, or make the radius uniform.',
+  },
+  {
     re: /will-change\s*:[^;{}]*,[^;{}]*,/i,
     msg: '`will-change` listing three or more properties asks the browser to keep every one optimisation-ready, which holds memory and can be slower than no hint. Hint only what actually animates.',
   },
@@ -102,34 +117,92 @@ export const ADVISE = [
 ];
 
 // --- checks that need more than one regex ---------------------------------------
+// Each returns `null` or a non-empty array of indices into `added`. Returning `[]`
+// would be truthy and report a clean file, so every one of these guards that.
 
-const BLOCK_RE = /(^|[;{}])\s*([^{};]+)\{([^{}]*)\}/g;
+// The separator is a LOOKBEHIND, not a capture. Consuming it meant a match ate the `}`
+// that the next block needed to anchor against, so back-to-back rules — the normal shape
+// of a stylesheet — were scanned every other one, and half of every block-scoped check
+// was silently skipped.
+const BLOCK_RE = /(?<=^|[;{}])\s*([^{};]+)\{([^{}]*)\}/g;
 
-function duplicateIdenticalDeclarations(added) {
-  for (const m of added.matchAll(BLOCK_RE)) {
-    const seen = new Map();
-    for (const decl of m[3].split(';')) {
-      const idx = decl.indexOf(':');
-      if (idx === -1) continue;
-      const prop = decl.slice(0, idx).trim().toLowerCase();
-      const value = decl
-        .slice(idx + 1)
-        .trim()
-        .toLowerCase();
-      if (!prop || prop.startsWith('--')) continue;
-      // If the same property is set to the same value twice in one block, the first is dead.
-      if (seen.get(prop) === value) return true;
-      seen.set(prop, value);
-    }
-  }
-  return false;
+// A block's body ends just before the closing `}` that terminates the match.
+const bodyStartOf = (m) => m.index + m[0].length - 1 - m[2].length;
+
+const found = (at) => (at.length ? at : null);
+
+// `--s-6` is ONE identifier: the `-6` is part of the name, not a subtraction. Blanking
+// custom-property identifiers before the test is the whole fix — without it every token
+// named `--s-1`, `--space-4`, `--z-10` made a valid `calc()` look malformed and the rule
+// refused the write.
+const MATH_NO_SPACE =
+  /\b(?:calc|clamp|min|max)\([^;{})]*?(?:[\w%] ?[+-][\d.(]|\)[+-][\d.(]|[%\d][+-] )/gi;
+const blankCustomIdents = (s) => s.replace(/--[\w-]+/g, (m) => '_'.repeat(m.length));
+
+function mathWhitespace(added) {
+  return found([...blankCustomIdents(added).matchAll(MATH_NO_SPACE)].map((m) => m.index));
 }
 
+function duplicateIdenticalDeclarations(added) {
+  const at = [];
+  for (const m of added.matchAll(BLOCK_RE)) {
+    const seen = new Map();
+    let offset = bodyStartOf(m);
+    for (const decl of m[2].split(';')) {
+      const idx = decl.indexOf(':');
+      const prop = idx === -1 ? '' : decl.slice(0, idx).trim().toLowerCase();
+      if (prop && !prop.startsWith('--')) {
+        const value = decl
+          .slice(idx + 1)
+          .trim()
+          .toLowerCase();
+        // If the same property is set to the same value twice in one block, the first is dead.
+        if (seen.get(prop) === value) at.push(offset + decl.search(/\S/));
+        seen.set(prop, value);
+      }
+      offset += decl.length + 1; // + the ';' that split consumed
+    }
+  }
+  return found(at);
+}
+
+const REORDER = [
+  /(?<![\w-])order\s*:\s*-?[1-9]\d*/gi,
+  /flex-direction\s*:\s*(?:row|column)-reverse/gi,
+  /flex-flow\s*:[^;{}]*(?:row|column)-reverse/gi,
+  // `1 / -1` spans every track from the first line to the last. Spanning the whole grid
+  // cannot reorder anything, so it is not a signal — only an explicit numbered track is.
+  /(?<![\w-])grid-(?:row|column)(?:-(?:start|end))?\s*:\s*\d+(?!\s*\/\s*-1)/gi,
+];
+
 function visualReorder(added) {
-  return (
-    /(?<![\w-])order\s*:\s*-?[1-9]\d*/i.test(added) ||
-    /flex-direction\s*:\s*(?:row|column)-reverse/i.test(added) ||
-    /flex-flow\s*:[^;{}]*(?:row|column)-reverse/i.test(added) ||
-    /(?<![\w-])grid-(?:row|column)(?:-(?:start|end))?\s*:\s*\d/i.test(added)
-  );
+  const at = [];
+  for (const re of REORDER) for (const m of added.matchAll(re)) at.push(m.index);
+  return found(at.sort((a, b) => a - b));
+}
+
+// A logical inline edge flips under `direction: rtl`; `border-radius` corners are
+// physical and do not. A block that sets both, with corners that differ left-to-right,
+// contradicts itself — the author asked for a direction-aware edge and a direction-blind
+// radius. Uniform radii are direction-agnostic and never fire.
+const INLINE_LOGICAL = /(?<![\w-])(?:border|padding|margin|inset)-inline(?:-(?:start|end))?\s*:/i;
+const RADIUS = /(?<![\w-])border-radius\s*:\s*([^;}]+)/i;
+
+// `border-radius: a b c d` is TL TR BR BL. Left and right differ when TL !== TR or
+// BL !== BR. One value is uniform; two and three set TL=a and TR=b.
+function flipsInRtl(value) {
+  const [a, b, c, d] = value.split('/')[0].trim().split(/\s+/);
+  if (b === undefined) return false;
+  if (d === undefined) return a !== b; // 2 or 3 values: TL=a, TR=b
+  return a !== b || d !== c;
+}
+
+function directionBlindRadius(added) {
+  const at = [];
+  for (const m of added.matchAll(BLOCK_RE)) {
+    if (!INLINE_LOGICAL.test(m[2])) continue;
+    const r = RADIUS.exec(m[2]);
+    if (r && flipsInRtl(r[1])) at.push(bodyStartOf(m) + r.index);
+  }
+  return found(at);
 }

@@ -114,8 +114,13 @@ Shape-function syntax itself — `inset` `xywh` `rect` `polygon` `path` `shape` 
 
 `prefers-reduced-motion` means fewer and gentler animations, **not zero** — keep opacity and color transitions that aid comprehension, remove movement and position changes. Gate hover animations behind `@media (hover: hover) and (pointer: fine)` — touch devices trigger hover on tap, cause false positives. (`prefers-reduced-transparency`, `prefers-contrast`, and vestibular specifics — see [`PHYSICS.md`](PHYSICS.md).)
 
+**`scroll-behavior: smooth` is an animation and gets the same branch.** Easiest one to forget: it carries no `@keyframes`, no `transition`, no duration, so it does not look like motion in the source — but it moves the entire viewport, triggered by a click, which is the largest movement on the page and a textbook vestibular trigger (WCAG 2.3.3). One line on `html` animates every in-page jump on the site; the reduce branch is one more.
+
 ```css
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto; /* the whole viewport moving is the biggest motion you ship */
+  }
   .element {
     animation: fade 0.2s ease; /* no transform-based motion */
   }
@@ -131,7 +136,7 @@ Motion / Framer Motion needs the same branch in JS — `useReducedMotion()` reci
 
 ## Done when
 
-Every line true before animation ships. Conditional lines pass untouched when condition absent.
+Every line true before animation ships. Conditional lines pass untouched when condition absent. The provable ones are checked rather than recalled — the per-edit hook refuses `transition: all` and layout-property transitions outright, and `node "${CLAUDE_PLUGIN_ROOT}/skills/css-audit/audit.mjs" <file>` re-runs the table over a whole sheet with `file:line`. Run it on the file you animated; judge feel yourself.
 
 - All four decision-engine constraints settled: animates or not, purpose named, easing picked, duration picked.
 - Easing is an `--ease-*` token, or `ease`/`linear` where Q3 assigns them; duration inside the band for that element type.
@@ -140,7 +145,7 @@ Every line true before animation ships. Conditional lines pass untouched when co
 - Driver matches the trigger: transition for discrete state change, spring for continuous gesture.
 - Entrances start at `scale(0.9)` or higher, paired with opacity.
 - Pressable elements carry press feedback — `scale(0.95–0.98)` on `:active`.
-- `prefers-reduced-motion` branch written: opacity and color kept, movement dropped.
+- `prefers-reduced-motion` branch written: opacity and color kept, movement dropped — including `scroll-behavior: auto` if the sheet sets `smooth` anywhere.
 - _Group of items entering:_ staggered 30–80ms apart rather than landing at once.
 - _Press-and-release or hold:_ enter and exit timings differ (slow in, snappy out).
 - _Hover motion:_ gated behind `@media (hover: hover) and (pointer: fine)`.
