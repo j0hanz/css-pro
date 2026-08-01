@@ -1,39 +1,8 @@
-// The rule table for css-pro.
-// Every rule asserts something that can be shown wrong — a spec violation, a performance problem, or an accessibility issue.
-// The rule table is a list of objects, each with a `re` regex and a `msg` string.
-// The regex is tested against the added CSS, and if it matches, the message is reported.
-// Some rules have a `when` array of regexes that must all match, and an `absent` regex that must not match.
-// Some rules have a `fn` function that takes the added CSS and returns either `null` (clean)
-// or a NON-EMPTY array of match indices — never `[]`, which is truthy and would report a
-// clean file. The indices let the whole-file audit print `file:line` for every occurrence;
-// the per-edit hook only needs the truthiness.
-// A rule with a `files` regex runs only on paths it matches.
-// ADVISE is ordered by severity: the runtime shows the first three hits and withholds the rest.
-
-// --- engagement gate ------------------------------------------------------------
-// Not rules. These decide whether a NON-stylesheet file is worth running the tables
-// over at all; `runtime.mjs` is the only caller. They live here because a gate that
-// engages wrongly is not a wasted millisecond — it drags the BLOCK table across a file
-// holding no CSS and turns an ordinary write into a PreToolUse deny, so it needs to sit
-// somewhere the self-test can import.
-
-// In a .tsx file almost nothing is CSS. Engage only where styling actually lives, so
-// the common case costs one regex and an exit.
 export const STYLE_MARKERS =
   /(?:styled|css|keyframes|createGlobalStyle)\s*[.(`]|(?:style|css|sx)\s*=\s*\{\{|createStyles\s*\(|\bstyle\s*\(\s*\{|<style[\s>]|\bstyle\s*=\s*["']/;
 
-// ...but an edit whose new_string holds only declarations — the usual way a styled block
-// already on disk gets changed — carries no marker at all, and used to exit before a
-// single rule ran. Matched narrowly on purpose. A bare `ident: ident` must NOT count:
-// that is every `x: number` in a TypeScript interface, and admitting it means
-// `Math.max(0, i-1)` in the same file reads as a malformed `calc()` and the write is
-// refused. What does count is a property no unquoted JS key can be — hyphenated or
-// `--` — or a value carrying a unit or a CSS function. Plain `transition` is named
-// because `transition: all` is the one BLOCK trigger with neither.
 export const DECLARATION =
   /^[ \t]*(?:--[\w-]+|[a-z]+(?:-[a-z]+)+|transition)[ \t]*:[ \t]*\S|:[ \t]*[^;{}\n]*(?:\d(?:px|r?em|%|vh|vw|dvh|vmin|vmax|ms|s|deg|fr|ch|pt)(?![\w-])|var\(|calc\(|clamp\()/im;
-
-// --- the tables -----------------------------------------------------------------
 
 export const BLOCK = [
   {
@@ -49,9 +18,6 @@ export const BLOCK = [
     msg: 'Transitioning a layout property runs layout and paint on every frame, on the main thread. Animate `transform` or `opacity` instead.',
   },
   {
-    // `calc()` is a CSS expression, not a math parser. `calc(1px+1px)` is invalid and the
-    // whole declaration is dropped. `calc(1px + 1px)` is valid and works. The same goes
-    // for `clamp()`, `min()`, and `max()`.
     fn: mathWhitespace,
     msg: '`calc()` requires whitespace around `+` and `-`. Without it the expression is invalid and the whole declaration is dropped.',
   },
@@ -92,13 +58,7 @@ export const ADVISE = [
     msg: 'Motion added with no `prefers-reduced-motion` in this file (WCAG 2.3.3). Fewer and gentler, not none — keep fades, drop movement. Ignore if handled globally.',
   },
   {
-    // Not reachable by the rule above: smooth scrolling carries no @keyframes, no
-    // transition, and no transform token, yet it is interaction-triggered movement of
-    // the whole viewport — the most common unguarded vestibular trigger in a stylesheet.
     when: [/scroll-behavior\s*:\s*smooth/i],
-    // The guard has to turn THIS off. A `prefers-reduced-motion` block anywhere in the
-    // file used to silence this rule, so one reduced-motion rule for an unrelated
-    // animation vouched for a smooth scroll nothing had ever guarded.
     absent: /scroll-behavior\s*:\s*auto/i,
     msg: 'Smooth scrolling is interaction-triggered movement of the whole viewport (WCAG 2.3.3) and a common vestibular trigger. Add `@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto } }`. Ignore if handled globally.',
   },
@@ -141,35 +101,16 @@ export const ADVISE = [
     msg: '`will-change` listing three or more properties asks the browser to keep every one optimisation-ready, which holds memory and can be slower than no hint. Hint only what actually animates.',
   },
   {
-    // Preprocessor @import compiles away; only plain CSS pays at runtime.
     files: /\.css$/i,
     re: /@import\b/i,
     msg: '`@import` is discovered only after this sheet downloads, then fetched serially, delaying first paint. Use another `<link>`, or ignore if a bundler inlines it.',
   },
 ];
 
-// --- checks that need more than one regex ---------------------------------------
-// Each returns `null` or a non-empty array of indices into `added`. Returning `[]`
-// would be truthy and report a clean file, so every one of these guards that.
+const BLOCK_RE = /(?<=^|[;{}])([^{};]+)\{([^{}]*)\}/g;
 
-// The separator is a LOOKBEHIND, not a capture. Consuming it meant a match ate the `}`
-// that the next block needed to anchor against, so back-to-back rules — the normal shape
-// of a stylesheet — were scanned every other one, and half of every block-scoped check
-// was silently skipped.
-const BLOCK_RE = /(?<=^|[;{}])\s*([^{};]+)\{([^{}]*)\}/g;
-
-// A block's body ends just before the closing `}` that terminates the match.
 const bodyStartOf = (m) => m.index + m[0].length - 1 - m[2].length;
 
-// Every rule block, parents included. `BLOCK_RE` alone only ever matches an INNERMOST
-// block — its body group cannot span a child's `{` — so the parent of any nested rule
-// went unscanned, and the three block-scoped checks below silently skipped it. That is
-// the normal shape of SCSS and Less, and now of plain CSS too.
-// Each pass yields the current innermost layer and blanks it, selector and braces and
-// all, so the layer above becomes innermost next time round. Blanking preserves length
-// and newlines, so `m.index` and `bodyStartOf(m)` still index the original text; a
-// blanked child leaves a run of spaces in its parent's body, which carries no `;` and
-// so cannot read as one of the parent's declarations.
 function* eachBlock(text) {
   for (let t = text; ;) {
     const layer = [...t.matchAll(BLOCK_RE)];
@@ -181,13 +122,6 @@ function* eachBlock(text) {
 
 const found = (at) => (at.length ? at : null);
 
-// `--s-6` is ONE identifier: the `-6` is part of the name, not a subtraction. Blanking
-// custom-property identifiers before the test is the whole fix — without it every token
-// named `--s-1`, `--space-4`, `--z-10` made a valid `calc()` look malformed and the rule
-// refused the write.
-// `Math.` is excluded because `Math.max(0, i - 1)` and `Math.min(n-1, x)` are the same
-// shape as a malformed `calc()` and read as one — every JS file that reaches this table
-// has them, and a BLOCK finding there refuses a write holding no CSS at all.
 const MATH_NO_SPACE =
   /(?<!Math\.)\b(?:calc|clamp|min|max)\([^;{})]*?(?:[\w%] ?[+-][\d.(]|\) ?[+-][\d.(]|[%\d][+-] )/gi;
 const blankCustomIdents = (s) => s.replace(/--[\w-]+/g, (m) => '_'.repeat(m.length));
@@ -209,15 +143,12 @@ function duplicateIdenticalDeclarations(added) {
           .slice(idx + 1)
           .trim()
           .toLowerCase();
-        // If the same property is set to the same value twice in one block, the first is dead.
         if (seen.get(prop) === value) at.push(offset + decl.search(/\S/));
         seen.set(prop, value);
       }
-      offset += decl.length + 1; // + the ';' that split consumed
+      offset += decl.length + 1;
     }
   }
-  // Sorted because `eachBlock` walks innermost-first, not in source order, and `--json`
-  // prints these in array order.
   return found(at.sort((a, b) => a - b));
 }
 
@@ -225,9 +156,6 @@ const REORDER = [
   /(?<![\w-])order\s*:\s*-?[1-9]\d*/gi,
   /flex-direction\s*:\s*(?:row|column)-reverse/gi,
   /flex-flow\s*:[^;{}]*(?:row|column)-reverse/gi,
-  // `1 / -1` spans every track from the first line to the last, and line 1 is where flow
-  // would have put the item anyway. Neither can reorder anything, so neither is a signal
-  // — only placement onto a later track is.
   /(?<![\w-])grid-(?:row|column)(?:-(?:start|end))?\s*:\s*(?!1\b)\d+(?!\s*\/\s*-1)/gi,
 ];
 
@@ -237,24 +165,15 @@ function visualReorder(added) {
   return found(at.sort((a, b) => a - b));
 }
 
-// A logical inline edge flips under `direction: rtl`; `border-radius` corners are
-// physical and do not. A block that sets both, with corners that differ left-to-right,
-// contradicts itself — the author asked for a direction-aware edge and a direction-blind
-// radius. Uniform radii are direction-agnostic and never fire.
 const INLINE_LOGICAL = /(?<![\w-])(?:border|padding|margin|inset)-inline(?:-(?:start|end))?\s*:/i;
 const RADIUS = /(?<![\w-])border-radius\s*:\s*([^;}]+)/i;
 
-// `border-radius: a b c d` is TL TR BR BL. Left and right differ when TL !== TR or
-// BL !== BR. The slash form `h / v` carries a separate vertical-radius set that
-// flips on its own, so a uniform horizontal half with an asymmetric vertical half
-// (`10px / 0 10px`) still contradicts the logical edge — check both halves.
-// Three values `a b c` are TL=a TR=b BR=c BL=b, so BL !== BR (b !== c) flips too.
 function flipsInRtl(value) {
   return value.split('/').some((half) => {
     const [a, b, c, d] = half.trim().split(/\s+/);
-    if (b === undefined) return false; // one value: uniform
-    if (d === undefined) return a !== b || (c !== undefined && b !== c); // 2 or 3
-    return a !== b || d !== c; // 4
+    if (b === undefined) return false;
+    if (d === undefined) return a !== b || (c !== undefined && b !== c);
+    return a !== b || d !== c;
   });
 }
 
@@ -268,12 +187,6 @@ function directionBlindRadius(added) {
   return found(at.sort((a, b) => a - b));
 }
 
-// An interactive control (`cursor: pointer`) the author has not wired into any
-// :focus-visible rule. Fires only when the file already uses :focus-visible —
-// a sheet that does no focus styling at all is a different conversation, and a
-// blanket rule here would fire on every button-styled div. Native-focusable
-// elements (a, button, summary) carry a UA focus ring by default, so this is
-// confirm-not-fix: a global outline reset may have killed it.
 function focusableMissingFocusVisible(added) {
   if (!/:focus-visible/i.test(added)) return null;
   const focused = new Set();
@@ -283,21 +196,13 @@ function focusableMissingFocusVisible(added) {
       for (const part of m[1].split(',')) focused.add(baseOfSelector(part));
     if (/(?<![\w-])cursor\s*:\s*pointer/i.test(m[2])) cursorBlocks.push(m);
   }
-  if (focused.has('*')) return null; // a universal :focus-visible covers all
+  if (focused.has('*')) return null;
   const at = [];
   for (const m of cursorBlocks)
     if (!m[1].split(',').some((part) => focused.has(baseOfSelector(part)))) at.push(bodyStartOf(m));
   return found(at.sort((a, b) => a - b));
 }
 
-// The rightmost compound's base: strip pseudo-elements, pseudo-classes (with
-// their args), and attribute selectors; split on combinators (incl. the
-// descendant space); take the last piece. `.parent .child:hover` -> `.child`,
-// `summary` -> `summary`, `*` -> `*`.
-// ponytail: does not flatten :is()/:where()/:not() args — a cursor on
-// `.x:is(.a,.b)` reads as base `.x`, so a `:focus-visible` on `.a` would not
-// cover it. A space inside a pseudo-function also mis-splits. ADVISE-tier
-// hedge covers the gap; full pseudo-function parsing is the upgrade path.
 function baseOfSelector(sel) {
   const last = sel
     .trim()

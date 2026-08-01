@@ -1,11 +1,4 @@
 #!/usr/bin/env node
-// css-pro. Invoked as `runtime.mjs pre|post`.
-//
-//   pre  — PreToolUse. Refuses a write carrying a defect provable from the edit alone.
-//          Blocking here means the defect never reaches disk; on PostToolUse it would
-//          already be written and we would only be arguing about it.
-//   post — PostToolUse. Advisories, capped, never gating.
-
 import { readFileSync } from 'node:fs';
 import { text } from 'node:stream/consumers';
 import { prepare } from './strip.mjs';
@@ -65,15 +58,12 @@ try {
       try {
         cached = prepare(readFileSync(path, 'utf8'), path);
       } catch {
-        cached = null; // unreadable, or not on disk yet for a pre-write Write
+        cached = null;
       }
     }
     return cached;
   };
 
-  // Nothing calls process.exit() past this point: stdout is a pipe, and on POSIX a pipe
-  // write is async — exiting on the next line truncates it, and a truncated deny is an
-  // allow. The process ends on its own once stdin is drained.
   if (MODE === 'pre') {
     const blocks = run(BLOCK, added, readFile, path);
     if (blocks.length) {
@@ -90,7 +80,7 @@ try {
         }),
       );
     }
-  } else {
+  } else if (MODE === 'post') {
     const advisories = run(ADVISE, added, readFile, path);
     if (advisories.length) {
       const shown = advisories.slice(0, ADVISORY_CAP);
@@ -109,5 +99,5 @@ try {
     }
   }
 } catch (e) {
-  console.error(e);
+  console.error(`css-pro: check skipped (${e.message.split('\n')[0]})`);
 }

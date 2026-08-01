@@ -41,7 +41,9 @@ write, or not at all.
 /plugin install css-pro@css-pro
 ```
 
-The checks run automatically. There is nothing to invoke.
+The checks run automatically. There is nothing to invoke. They need `node` on your `PATH`
+and nothing else — no bash, no `jq`, so they behave the same under Git Bash, PowerShell
+and a POSIX shell. Without `node` the hooks report an error and no write is ever blocked.
 
 ## Skills
 
