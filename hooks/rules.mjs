@@ -39,7 +39,7 @@ export const BLOCK = [
     msg: '`oklch()` and `oklab()` lightness is 0–1, or a percentage. A bare value above 1 silently clamps and gives you the wrong colour.',
   },
   {
-    re: /(?<![\w-])(background|font|border)(?!-[a-z-]*(?:radius|collapse|spacing|blend-mode|smooth(?:ing)?)\b)-[a-z-]+\s*:[^{}]*;[^{}]*(?<![\w-])\1\s*:/i,
+    re: /(?<![\w-])(background|font|border|margin|padding|inset|transition|animation|overflow)(?!-[a-z-]*(?:radius|collapse|spacing|blend-mode|smooth(?:ing)?|wrap|anchor|clip-margin|trim|area)\b)-[a-z-]+\s*:[^{}]*;[^{}]*(?<![\w-])\1\s*:/i,
     msg: 'A longhand set before its shorthand is discarded — the shorthand resets every longhand it omits. Fold it in, or move it after.',
   },
   {
