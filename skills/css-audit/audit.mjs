@@ -55,7 +55,12 @@ function globalize(re) {
 }
 
 // `prepare` blanks stylesheets in place, so offsets into `prepared` index `src` too.
+// That holds only while prepare preserves length — prepareCode appends synthetic
+// blocks for CSS-in-JS, so for non-CSS inputs the lengths diverge and slicing `src`
+// with `prepared` offsets would mis-restore. Degrade to no restoration (still safe:
+// strings stay blanked) rather than slice wrong bytes.
 function restoreStrings(prepared, src) {
+  if (prepared.length !== src.length) return prepared;
   return prepared.replace(/(['"])[^'"\n]*\1/g, (m, q, off) => {
     const inner = src.slice(off + 1, off + m.length - 1).replace(/[{};]/g, ' ');
     return q + inner + q;
@@ -256,6 +261,20 @@ function customPropertyFindings(files) {
   return out;
 }
 
+// `/* csspro-ignore */` on a line suppresses findings on that line and the next
+// (the declaration it sits above). Scanned on raw, before prepare, because
+// comment-blanking would hide the marker. CLI-only; the per-edit hook is unaffected.
+function ignoreLines(raw) {
+  const ignore = new Set();
+  raw.split('\n').forEach((l, i) => {
+    if (l.includes('csspro-ignore')) {
+      ignore.add(i + 1);
+      ignore.add(i + 2);
+    }
+  });
+  return ignore;
+}
+
 function auditFile(path) {
   let raw;
   try {
@@ -265,13 +284,18 @@ function auditFile(path) {
   }
   const prepared = prepare(raw, path);
   const lineOf = makeLineLookup(prepared);
+  const sass = SASS_INDENTED.test(path);
   return {
     path,
     prepared,
     lineOf,
+    ignore: ignoreLines(raw),
     block: runTable(BLOCK, prepared, path, lineOf),
     advise: runTable(ADVISE, prepared, path, lineOf),
-    structure: structureFindings(restoreStrings(prepared, raw), lineOf),
+    // Indented Sass is brace-less: parseRules would find nothing, so the
+    // SASS_NOTE's "skipped" stays honest rather than a silent parser no-op
+    // that a stray brace could later fabricate findings out of.
+    structure: sass ? [] : structureFindings(restoreStrings(prepared, raw), lineOf),
     mix: directionMix(prepared),
     declaresProps: /--[\w-]+\s*:/.test(prepared),
   };
@@ -425,6 +449,15 @@ function selfTest() {
     'html { scroll-behavior: smooth; }\n@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }',
     'guarded.css',
   );
+  const focusMissing = adviseOn(
+    '.btn { cursor: pointer; }\n.a:focus-visible { outline: 1px; }',
+    'fm.css',
+  );
+  const focusCovered = adviseOn(
+    '.btn { cursor: pointer; }\n.btn:focus-visible { outline: 1px; }',
+    'fc.css',
+  );
+  const focusNoVis = adviseOn('.btn { cursor: pointer; }', 'fn.css');
   const dupUnused = propsCD.filter((f) => f.msg.includes('--dup') && /never read/.test(f.msg));
   const nopeUndef = propsCD.filter((f) => f.msg.includes('--nope') && /not declared/.test(f.msg));
   const sites = (arr) => new Set(arr.map((f) => f.path));
@@ -585,6 +618,26 @@ function selfTest() {
       'direction mix reports a line for each physical inline-axis site',
       directionMix('.a{margin-inline-start:1px;margin-left:2px}')?.at.length === 1,
     ],
+    ['prepare preserves length (restoreStrings invariant)', prepared.length === src.length],
+    [
+      'ADVISE flags cursor:pointer selector missing from :focus-visible list',
+      has(focusMissing, 'Interactive'),
+    ],
+    [
+      'ADVISE silent when cursor:pointer covered by a :focus-visible rule',
+      !has(focusCovered, 'Interactive'),
+    ],
+    [
+      'ADVISE focus rule silent when the file does no :focus-visible at all',
+      !has(focusNoVis, 'Interactive'),
+    ],
+    [
+      'csspro-ignore suppresses the marker line and the next',
+      (() => {
+        const ign = ignoreLines('a\n/* csspro-ignore */\nb\nc');
+        return ign.has(2) && ign.has(3) && !ign.has(1) && !ign.has(4);
+      })(),
+    ],
   ];
   let fail = 0;
   for (const [name, ok] of tests) {
@@ -597,7 +650,8 @@ function selfTest() {
 
 function main(args) {
   const strict = args.includes('--strict');
-  const argv = args.filter((a) => a !== '--strict');
+  const json = args.includes('--json');
+  const argv = args.filter((a) => a !== '--strict' && a !== '--json');
   if (argv.length === 0) {
     console.log('css-pro audit: no files given; running self-test.\n');
     return selfTest();
@@ -636,30 +690,60 @@ function main(args) {
     propsByPath.get(f.path).push(f);
   }
 
+  // Apply `csspro-ignore` per file, then assemble whole-file findings. A finding
+  // with no line (none currently) survives the filter — only line-pinned ones drop.
   const counts = { files: 0, block: 0, advise: 0, whole: 0 };
   for (const r of results) {
-    if (!r.error) {
-      r.whole = [...r.structure, ...(propsByPath.get(r.path) ?? [])];
-      counts.files++;
-      counts.block += r.block.length;
-      counts.advise += r.advise.length;
-      counts.whole += r.whole.length;
-    }
-    report(r);
+    if (r.error) continue;
+    const keep = (f) => f.line == null || !r.ignore.has(f.line);
+    r.block = r.block.filter(keep);
+    r.advise = r.advise.filter(keep);
+    r.structure = r.structure.filter(keep);
+    r.whole = [...r.structure, ...(propsByPath.get(r.path) ?? []).filter(keep)];
+    counts.files++;
+    counts.block += r.block.length;
+    counts.advise += r.advise.length;
+    counts.whole += r.whole.length;
   }
-  console.log(
-    `\n${counts.files} file(s): ${counts.block} BLOCK, ${counts.advise} ADVISE, ${counts.whole} WHOLE-FILE.`,
-  );
-  if (counts.files === 1 && results.some((r) => !r.error && r.declaresProps))
+
+  if (json) {
+    const out = [];
+    for (const r of results) {
+      if (r.error) {
+        out.push({ path: r.path, line: null, severity: 'error', msg: r.error });
+        continue;
+      }
+      for (const f of r.block)
+        out.push({ path: r.path, line: f.line, severity: 'block', msg: f.msg });
+      for (const f of r.advise)
+        out.push({ path: r.path, line: f.line, severity: 'advise', msg: f.msg });
+      for (const f of r.whole)
+        out.push({ path: r.path, line: f.line, severity: 'whole', msg: f.msg });
+      if (r.mix)
+        out.push({
+          path: r.path,
+          line: null,
+          severity: 'note',
+          msg: `mixes direction conventions — ${r.mix.physical} physical, ${r.mix.logical} logical inline-axis declarations`,
+        });
+    }
+    console.log(JSON.stringify(out, null, 2));
+  } else {
+    for (const r of results) report(r);
     console.log(
-      'Scoped to one sheet: custom properties were resolved against it alone, so a token shared with a sibling sheet reads as dead or undefined here. Pass every stylesheet to resolve them.',
+      `\n${counts.files} file(s): ${counts.block} BLOCK, ${counts.advise} ADVISE, ${counts.whole} WHOLE-FILE.`,
     );
-  const undisposed = counts.advise + counts.whole;
-  if (undisposed && !strict)
-    console.log(
-      `${undisposed} ADVISE/WHOLE-FILE finding(s) are reported, not gated — confirm each intentional or fix it (css-audit SKILL.md, "Done when"). \`--strict\` gates them.`,
-    );
-  const gated = strict ? counts.block + undisposed : counts.block;
+    if (counts.files === 1 && results.some((r) => !r.error && r.declaresProps))
+      console.log(
+        'Scoped to one sheet: custom properties were resolved against it alone, so a token shared with a sibling sheet reads as dead or undefined here. Pass every stylesheet to resolve them.',
+      );
+    const undisposed = counts.advise + counts.whole;
+    if (undisposed && !strict)
+      console.log(
+        `${undisposed} ADVISE/WHOLE-FILE finding(s) are reported, not gated — confirm each intentional or fix it (css-audit SKILL.md, "Done when"). \`--strict\` gates them.`,
+      );
+  }
+  const gated = strict ? counts.block + counts.advise + counts.whole : counts.block;
   return gated > 0 || failed > 0 ? 1 : 0;
 }
 

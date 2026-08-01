@@ -55,6 +55,10 @@ export const ADVISE = [
     msg: 'Removing the outline with no `:focus-visible` in this file leaves keyboard users with no visible focus (WCAG 2.4.7). Replace it, do not just remove it.',
   },
   {
+    fn: focusableMissingFocusVisible,
+    msg: 'Interactive (`cursor: pointer`) but no `:focus-visible` rule targets this selector. Confirm a visible focus style reaches it — the UA ring alone may not survive a global outline reset. WCAG 2.4.7.',
+  },
+  {
     when: [
       /@keyframes|(?<![\w-])(?:animation|transition)(?:-[a-z]+)?\s*:/i,
       /\btransform\s*:|translate|rotate|(?<![a-z])scale/i,
@@ -209,4 +213,48 @@ function directionBlindRadius(added) {
     if (r && flipsInRtl(r[1])) at.push(bodyStartOf(m) + r.index);
   }
   return found(at);
+}
+
+// An interactive control (`cursor: pointer`) the author has not wired into any
+// :focus-visible rule. Fires only when the file already uses :focus-visible —
+// a sheet that does no focus styling at all is a different conversation, and a
+// blanket rule here would fire on every button-styled div. Native-focusable
+// elements (a, button, summary) carry a UA focus ring by default, so this is
+// confirm-not-fix: a global outline reset may have killed it.
+function focusableMissingFocusVisible(added) {
+  if (!/:focus-visible/i.test(added)) return null;
+  const focused = new Set();
+  const cursorBlocks = [];
+  for (const m of added.matchAll(BLOCK_RE)) {
+    if (m[1].includes(':focus-visible'))
+      for (const part of m[1].split(',')) focused.add(baseOfSelector(part));
+    if (/(?<![\w-])cursor\s*:\s*pointer/i.test(m[2])) cursorBlocks.push(m);
+  }
+  if (focused.has('*')) return null; // a universal :focus-visible covers all
+  const at = [];
+  for (const m of cursorBlocks)
+    if (!m[1].split(',').some((part) => focused.has(baseOfSelector(part)))) at.push(bodyStartOf(m));
+  return found(at.sort((a, b) => a - b));
+}
+
+// The rightmost compound's base: strip pseudo-elements, pseudo-classes (with
+// their args), and attribute selectors; split on combinators (incl. the
+// descendant space); take the last piece. `.parent .child:hover` -> `.child`,
+// `summary` -> `summary`, `*` -> `*`.
+// ponytail: does not flatten :is()/:where()/:not() args — a cursor on
+// `.x:is(.a,.b)` reads as base `.x`, so a `:focus-visible` on `.a` would not
+// cover it. A space inside a pseudo-function also mis-splits. ADVISE-tier
+// hedge covers the gap; full pseudo-function parsing is the upgrade path.
+function baseOfSelector(sel) {
+  const last = sel
+    .trim()
+    .split(/\s*[>+~]\s*|\s+/)
+    .pop();
+  return (
+    last
+      .replace(/::?[\w-]+(\([^)]*\))?/g, '')
+      .replace(/\[[^\]]*\]/g, '')
+      .trim()
+      .toLowerCase() || '*'
+  );
 }
