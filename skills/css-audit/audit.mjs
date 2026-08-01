@@ -185,6 +185,44 @@ const declsOf = (body) =>
     .map(norm)
     .filter((d) => d.includes(':'));
 
+// The four ways a block can resemble an earlier one — identical, repeated,
+// redeclared-whole, overlapping — share `near` and the selector/decl context, so
+// they read as one decision rather than four branches inline in the scan. Order
+// matters: `same` cases precede the `!same` ones, mirroring the original else-if
+// chain, so the first match wins and the rest never fire.
+function overlapFinding(r, near, decls) {
+  const same = near?.ratio === 1;
+  if (same && norm(near.rule.selector) === norm(r.selector))
+    return {
+      line: r.line,
+      msg: `duplicate block — \`${norm(r.selector) || '(unnamed)'}\` is identical to the one at line ${near.rule.line}.`,
+    };
+  if (same && decls.length >= MIN_REPEATED_DECLS)
+    return {
+      line: r.line,
+      msg: `repeated declarations — \`${norm(r.selector)}\` sets the same ${decls.length} declarations as \`${norm(near.rule.selector)}\` at line ${near.rule.line}, under the same conditions. One selector list, or a shared class.`,
+    };
+  // A block that re-asserts the WHOLE of an earlier block (shared === the
+  // earlier count) then adds its own: a copied-then-extended component. The
+  // ratio gate misses it — a 12-decl block sharing 7 with a 7-decl block scores
+  // 0.58 — so this branch is containment, not ratio. The re-assertion may be
+  // dead (this selector already inherits the earlier rule) or a copy wanting
+  // a shared class; the message hedges both.
+  if (near && !same && near.shared === near.rule.declCount && near.shared >= MIN_FULL_REDECL)
+    return {
+      line: r.line,
+      msg: `redeclares an earlier block — \`${norm(r.selector)}\` repeats all ${near.shared} declarations of \`${norm(near.rule.selector)}\` at line ${near.rule.line}. Drop them if this selector already inherits that rule; lift the shared set onto a common class if not.`,
+    };
+  // Byte-identical bodies are rare in hand-written CSS; a copied component that then
+  // drifted by one declaration is the common shape, and an equality test never sees it.
+  if (near && near.shared >= MIN_SHARED_DECLS && near.ratio >= MIN_OVERLAP_RATIO)
+    return {
+      line: r.line,
+      msg: `overlapping declarations — \`${norm(r.selector)}\` shares ${near.shared} of its ${decls.length} declarations with \`${norm(near.rule.selector)}\` at line ${near.rule.line}, under the same conditions. Lift the shared set onto one selector list or a common class.`,
+    };
+  return null;
+}
+
 function structureFindings(prepared, lineOf) {
   const rules = parseRules(prepared, lineOf);
   const out = [];
@@ -208,35 +246,8 @@ function structureFindings(prepared, lineOf) {
     // Matched on the declaration SET, so `.a{x;y}` and `.b{y;x}` are the same block —
     // keyed on source order, every reordered copy of a block went unreported.
     const near = nearestOverlap(byDecl, ctx, keys);
-    const same = near?.ratio === 1;
-    if (same && norm(near.rule.selector) === norm(r.selector))
-      out.push({
-        line: r.line,
-        msg: `duplicate block — \`${norm(r.selector) || '(unnamed)'}\` is identical to the one at line ${near.rule.line}.`,
-      });
-    else if (same && decls.length >= MIN_REPEATED_DECLS)
-      out.push({
-        line: r.line,
-        msg: `repeated declarations — \`${norm(r.selector)}\` sets the same ${decls.length} declarations as \`${norm(near.rule.selector)}\` at line ${near.rule.line}, under the same conditions. One selector list, or a shared class.`,
-      });
-    // A block that re-asserts the WHOLE of an earlier block (shared === the
-    // earlier count) then adds its own: a copied-then-extended component. The
-    // ratio gate misses it — a 12-decl block sharing 7 with a 7-decl block scores
-    // 0.58 — so this branch is containment, not ratio. The re-assertion may be
-    // dead (this selector already inherits the earlier rule) or a copy wanting
-    // a shared class; the message hedges both.
-    else if (near && !same && near.shared === near.rule.declCount && near.shared >= MIN_FULL_REDECL)
-      out.push({
-        line: r.line,
-        msg: `redeclares an earlier block — \`${norm(r.selector)}\` repeats all ${near.shared} declarations of \`${norm(near.rule.selector)}\` at line ${near.rule.line}. Drop them if this selector already inherits that rule; lift the shared set onto a common class if not.`,
-      });
-    // Byte-identical bodies are rare in hand-written CSS; a copied component that then
-    // drifted by one declaration is the common shape, and an equality test never sees it.
-    else if (near && near.shared >= MIN_SHARED_DECLS && near.ratio >= MIN_OVERLAP_RATIO)
-      out.push({
-        line: r.line,
-        msg: `overlapping declarations — \`${norm(r.selector)}\` shares ${near.shared} of its ${decls.length} declarations with \`${norm(near.rule.selector)}\` at line ${near.rule.line}, under the same conditions. Lift the shared set onto one selector list or a common class.`,
-      });
+    const f = overlapFinding(r, near, decls);
+    if (f) out.push(f);
     r.declCount = keys.length;
     for (const d of keys) {
       const k = `${ctx}\0${d}`;
