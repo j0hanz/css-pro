@@ -11,7 +11,7 @@
       "name": "css-pro",
       "source": "./",
       "description": "Stops agents wrecking your CSS. Checks CSS as it is written and refuses writes carrying provable defects — invalid values, declarations that silently do nothing, dead custom properties, accessibility failures. Raw CSS and CSS-in-JS; makes no style decisions for you.",
-      "version": "0.4.0"
+      "version": "0.5.0"
     }
   ]
 }
