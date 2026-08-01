@@ -321,48 +321,39 @@ function format(path, f) {
   return f.line == null ? `  ${f.msg}` : `  ${path}:${f.line}  ${f.msg}`;
 }
 
+// parseRules is brace-driven; indented Sass has no braces, so the empty-rule and
+// duplicate-block checks never ran on it. Say so on every .sass file — "clean" would
+// claim otherwise. (customPropertyFindings is regex-based and did run.)
+const SASS_NOTE =
+  '  (note: indented Sass — empty/duplicate rule checks skipped; rule table and custom-property checks did run)';
+
+// Severity order, highest first: the key on the result object and the heading it prints.
+const GROUPS = [
+  ['block', 'BLOCK — provable, fix:'],
+  ['advise', 'ADVISE — measurable, confirm or fix:'],
+  ['whole', 'WHOLE-FILE — only visible at file scale:'],
+];
+
+// Prints; counts are main's job. Two sources for the same number is one too many.
 function report(r) {
   if (r.error) {
     console.log(`== ${r.path} ==\n  (skipped: ${r.error})`);
-    return 0;
+    return;
   }
-  const { path, block, advise, whole, mix } = r;
+  const { path, mix } = r;
+  const groups = GROUPS.filter(([key]) => r[key].length);
+  console.log(groups.length ? `== ${path} ==` : `== ${path} ==  clean`);
+  for (const [key, heading] of groups) {
+    console.log(heading);
+    for (const f of r[key]) console.log(format(path, f));
+  }
   // Neither a finding nor a verdict: a file that uses both conventions is a fact the
   // developer can only see at this scale. Printed alongside `clean` too.
-  const mixNote = mix
-    ? `  (note: mixes direction conventions — ${mix.logical} logical and ${mix.physical} physical declarations)`
-    : null;
-  if (!block.length && !advise.length && !whole.length) {
-    console.log(`== ${path} ==  clean`);
-    if (mixNote) console.log(mixNote);
-    // parseRules is brace-driven; indented Sass has no braces, so empty-rule and
-    // duplicate-block checks never ran. Say so — "clean" would claim otherwise.
-    // (customPropertyFindings is regex-based and did run.)
-    if (SASS_INDENTED.test(path))
-      console.log(
-        '  (note: indented Sass — empty/duplicate rule checks skipped; rule table and custom-property checks did run)',
-      );
-    return 0;
-  }
-  console.log(`== ${path} ==`);
-  if (block.length) {
-    console.log('BLOCK — provable, fix:');
-    for (const f of block) console.log(format(path, f));
-  }
-  if (advise.length) {
-    console.log('ADVISE — measurable, confirm or fix:');
-    for (const f of advise) console.log(format(path, f));
-  }
-  if (whole.length) {
-    console.log('WHOLE-FILE — only visible at file scale:');
-    for (const f of whole) console.log(format(path, f));
-  }
-  if (mixNote) console.log(mixNote);
-  if (SASS_INDENTED.test(path))
+  if (mix)
     console.log(
-      '  (note: indented Sass — empty/duplicate rule checks skipped; rule table and custom-property checks did run)',
+      `  (note: mixes direction conventions — ${mix.logical} logical and ${mix.physical} physical declarations)`,
     );
-  return block.length;
+  if (SASS_INDENTED.test(path)) console.log(SASS_NOTE);
 }
 
 // --- self-test ----------------------------------------------------------------
@@ -616,19 +607,16 @@ function main(args) {
     propsByPath.get(f.path).push(f);
   }
 
-  let totalBlock = 0;
   const counts = { files: 0, block: 0, advise: 0, whole: 0 };
   for (const r of results) {
-    if (r.error) {
-      totalBlock += report(r);
-      continue;
+    if (!r.error) {
+      r.whole = [...r.structure, ...(propsByPath.get(r.path) ?? [])];
+      counts.files++;
+      counts.block += r.block.length;
+      counts.advise += r.advise.length;
+      counts.whole += r.whole.length;
     }
-    r.whole = [...r.structure, ...(propsByPath.get(r.path) ?? [])];
-    counts.files++;
-    counts.block += r.block.length;
-    counts.advise += r.advise.length;
-    counts.whole += r.whole.length;
-    totalBlock += report(r);
+    report(r);
   }
   console.log(
     `\n${counts.files} file(s): ${counts.block} BLOCK, ${counts.advise} ADVISE, ${counts.whole} WHOLE-FILE.`,
@@ -645,7 +633,7 @@ function main(args) {
     console.log(
       `${undisposed} ADVISE/WHOLE-FILE finding(s) are reported, not gated — confirm each intentional or fix it (css-audit SKILL.md, "Done when"). \`--strict\` gates them.`,
     );
-  const gated = strict ? totalBlock + undisposed : totalBlock;
+  const gated = strict ? counts.block + undisposed : counts.block;
   return gated > 0 || failed > 0 ? 1 : 0;
 }
 
