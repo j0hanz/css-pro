@@ -6,7 +6,6 @@
 //          already be written and we would only be arguing about it.
 //   post — PostToolUse. Advisories, capped, never gating.
 
-import { extname } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { text } from 'node:stream/consumers';
 import { prepare } from './strip.mjs';
@@ -56,9 +55,8 @@ try {
   const path = payload.tool_input?.file_path;
   if (!path) process.exit(0);
 
-  const ext = extname(path);
-  const isSheet = STYLESHEET.test(ext);
-  if (!isSheet && !HOST.test(ext)) process.exit(0);
+  const isSheet = STYLESHEET.test(path);
+  if (!isSheet && !HOST.test(path)) process.exit(0);
 
   const raw = addedText(payload);
   if (!raw) process.exit(0);
