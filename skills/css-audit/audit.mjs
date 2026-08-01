@@ -5,10 +5,14 @@ import { prepare } from '../../hooks/strip.mjs';
 import { BLOCK, ADVISE } from '../../hooks/rules.mjs';
 
 const STYLESHEET = /\.(css|scss|sass|less)$/i;
+// Everything the per-edit hook engages on. The audit used to accept STYLESHEET only,
+// so `audit.mjs src/ --strict` on a React or Vue tree reported `0 file(s)` and exited
+// 0 — a CI gate that audited nothing and passed. `prepare()` has always read these.
+const AUDITABLE = /\.(css|scss|sass|less|[cm]?[jt]sx?|vue|svelte|astro|html?)$/i;
 const GLOB = /[*?[\]{}]/;
 const SASS_INDENTED = /\.sass$/i;
 
-const USAGE = `css-pro audit — whole-file CSS/SCSS/Sass/Less audit.
+const USAGE = `css-pro audit — whole-file audit of stylesheets and the styles inside source files.
 
 usage:
   node audit.mjs <file|dir|glob>... [--strict] [--json]
@@ -20,7 +24,12 @@ usage:
   --list-rules  print the rule table, then exit
   --help, -h    this message
   --self-test   run the built-in self-test (also runs with no arguments)
-  <dir>         recurse for .css/.scss/.sass/.less (no Node 22 needed; globs do)
+  <dir>         recurse (no Node 22 needed; globs do), skipping node_modules and dot-dirs
+
+Reads .css/.scss/.sass/.less, CSS-in-JS in .js/.jsx/.ts/.tsx (+ .mjs/.cjs/.mts/.cts),
+and <style>/<script>/style="" in .vue/.svelte/.astro/.html. WHOLE-FILE structure checks
+run on stylesheets only. A finding inside an object-form style is reported against the
+line its object literal opens on.
 
 Suppress a false positive: put /* csspro-ignore */ on the line above the finding
 (or on the same line); it covers that line and the next.
@@ -326,10 +335,32 @@ function walkDir(dir) {
   }
   for (const e of entries) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkDir(p));
-    else if (STYLESHEET.test(e.name)) out.push(p);
+    // Dependencies and tooling state are not the project's CSS. Harmless while only
+    // stylesheets matched; once AUDITABLE took in .js/.ts, `audit.mjs .` walked every
+    // file in node_modules and reported findings against them.
+    if (e.isDirectory()) {
+      if (e.name !== 'node_modules' && !e.name.startsWith('.')) out.push(...walkDir(p));
+    } else if (AUDITABLE.test(e.name)) out.push(p);
   }
   return out;
+}
+
+// The source offset of the synthetic block covering `idx`. Blocks are appended in
+// source order, so the last one starting at or before `idx` is the one it fell in.
+function sourceOf(blocks, idx) {
+  let source = 0;
+  for (const b of blocks) {
+    if (b.at > idx) break;
+    source = b.source;
+  }
+  return source;
+}
+
+// One definition, used by auditFile and by the self-test — a test that re-implements
+// this proves nothing about the code that ships.
+function lineLookupFor(raw, prepared, blocks) {
+  const lineAt = makeLineLookup(prepared);
+  return (idx) => lineAt(idx < raw.length ? idx : sourceOf(blocks, idx));
 }
 
 function auditFile(path) {
@@ -339,8 +370,14 @@ function auditFile(path) {
   } catch (e) {
     return { path, error: `unreadable: ${e.code || e.message}` };
   }
-  const prepared = prepare(raw, path);
-  const lineOf = makeLineLookup(prepared);
+  const blocks = [];
+  const prepared = prepare(raw, path, blocks);
+  // `prepare` keeps the source as a same-length prefix and appends synthetic blocks
+  // for object-form styles and style="" attributes. An index past the source has no
+  // position of its own — reporting one anyway printed `b.html:10` for an 8-line file
+  // — but the object it was lifted from does, and `blocks` carries it. That line is
+  // both the one to print and the one a `csspro-ignore` marker sits above.
+  const lineOf = lineLookupFor(raw, prepared, blocks);
   const sass = SASS_INDENTED.test(path);
   return {
     path,
@@ -349,10 +386,15 @@ function auditFile(path) {
     ignore: ignoreLines(raw),
     block: runTable(BLOCK, prepared, path, lineOf),
     advise: runTable(ADVISE, prepared, path, lineOf),
-    // Indented Sass is brace-less: parseRules would find nothing, so the
-    // SASS_NOTE's "skipped" stays honest rather than a silent parser no-op
-    // that a stray brace could later fabricate findings out of.
-    structure: sass ? [] : structureFindings(restoreStrings(prepared, raw), lineOf),
+    // Stylesheets only. Indented Sass is brace-less: parseRules would find nothing,
+    // so the SASS_NOTE's "skipped" stays honest rather than a silent parser no-op
+    // that a stray brace could later fabricate findings out of. A host file is worse
+    // than empty — its synthetic `x{ ... }` blocks are siblings by construction, so
+    // every component with two styled objects would read as a duplicate rule.
+    structure:
+      sass || !STYLESHEET.test(path)
+        ? []
+        : structureFindings(restoreStrings(prepared, raw), lineOf),
     mix: directionMix(prepared),
     declaresProps: /--[\w-]+\s*:/.test(prepared),
   };
@@ -507,6 +549,39 @@ function selfTest() {
     const p = prepare(css, name);
     return runTable(ADVISE, p, name, makeLineLookup(p));
   };
+  const blockOn = (css, name) => {
+    const p = prepare(css, name);
+    return runTable(BLOCK, p, name, makeLineLookup(p));
+  };
+  // Line 6 is the declaration; line 2 is prose that merely names it. A markup file
+  // has to report the first and stay silent on the second.
+  const vueBlock = blockOn(
+    [
+      '<template>',
+      '  <p>never write transition: all</p>',
+      '</template>',
+      '',
+      '<style>',
+      '.a { transition: all 1s; }',
+      '</style>',
+    ].join('\n'),
+    'a.vue',
+  );
+  // The attribute sits on line 2 and the object on line 3, so a lookup that fell back
+  // to "start of file" would read as line 1 and fail rather than pass by accident.
+  const onLine = (raw, name) => {
+    const blocks = [];
+    const p = prepare(raw, name, blocks);
+    return runTable(BLOCK, p, name, lineLookupFor(raw, p, blocks));
+  };
+  const attrBlock = onLine('<div\n  style="color: red; color: red"\n></div>\n', 'b.html');
+  const objBlock = onLine(
+    // Test data, not a declaration. styleObjectBlocks reads unblanked code on purpose
+    // (template literals carry real CSS), so it mines this string too. csspro-ignore
+    'const A = 1;\nconst B = 2;\nconst S = <div style={{ transitionProperty: "all" }} />;\n',
+    'c.tsx',
+  );
+  const nullLine = formatGroup('x.tsx', [{ line: null, msg: 'no-position finding' }]);
   const smoothAdvise = adviseOn(
     'html { scroll-behavior: smooth; }\n@media (prefers-reduced-motion: reduce) { .x { animation: none; } }',
     'smooth.css',
@@ -730,6 +805,30 @@ function selfTest() {
       !has(focusNoVis, 'Interactive'),
     ],
     [
+      'markup finding carries its SOURCE line, not a post-extraction line',
+      vueBlock.some((f) => f.line === 6 && /animates every property/.test(f.msg)),
+    ],
+    [
+      'markup prose naming a declaration is not a second finding',
+      vueBlock.filter((f) => /animates every property/.test(f.msg)).length === 1,
+    ],
+    [
+      'style="" attribute keeps block-scoped rule coverage',
+      attrBlock.some((f) => /set twice to the same value/.test(f.msg)),
+    ],
+    [
+      'style="" finding reports the attribute\'s line, not one past EOF',
+      attrBlock.some((f) => /set twice to the same value/.test(f.msg) && f.line === 2),
+    ],
+    [
+      'object-form CSS-in-JS finding reports the line of its object literal',
+      objBlock.some((f) => /animates every property/.test(f.msg) && f.line === 3),
+    ],
+    [
+      'a finding with no line prints its message with no location',
+      nullLine.length === 1 && !nullLine[0].includes('x.tsx'),
+    ],
+    [
       'csspro-ignore suppresses the marker line and the next',
       (() => {
         const ign = ignoreLines('a\n/* csspro-ignore */\nb\nc');
@@ -821,12 +920,13 @@ function main(args) {
 
   const results = [];
   for (const path of paths) {
-    if (!STYLESHEET.test(path)) {
-      // Non-style files are a benign skip (exit stays 0), not a failed arg —
-      // the per-edit hook covers edits to them, so the audit just ignores them.
+    if (!AUDITABLE.test(path)) {
+      // A file that holds no CSS at all is a benign skip (exit stays 0), not a
+      // failed arg — passing a whole source tree and having the non-styling files
+      // ignored is the normal case, not a mistake worth failing a build over.
       skips.push({
         arg: path,
-        msg: 'audit targets .css/.scss/.sass/.less; the per-edit hook covers edits to other files',
+        msg: 'audit targets stylesheets, CSS-in-JS, and single-file component styles',
         sev: 'note',
       });
       continue;

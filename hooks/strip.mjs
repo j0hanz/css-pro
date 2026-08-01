@@ -13,32 +13,101 @@ const MARKUP_LANGS = /\.(html?|astro|vue|svelte)$/i;
 // `<style lang="scss">` is SCSS, not CSS: `//` opens a comment there too.
 const STYLE_LANG = /\blang\s*=\s*["']?(?:scss|sass|less)/i;
 
-export function prepare(text, filePath = '') {
-  if (MARKUP_LANGS.test(filePath)) return prepareMarkup(text);
-  return prepareCode(stripComments(text, LINE_COMMENT_LANGS.test(filePath)));
+// `sink`, when given, receives one `{ at, source }` per appended synthetic block: `at`
+// is where that block starts in the RETURNED string, `source` is where the object it
+// was lifted from starts in `text`. Object-form declarations have no position in the
+// source prefix, so without this a caller can only report them with no line — and a
+// finding with no line is one no `csspro-ignore` marker can ever reach. Omitting the
+// argument changes nothing: the returned string is identical either way, which is what
+// keeps the blocking hook's behaviour fixed.
+export function prepare(text, filePath = '', sink) {
+  if (MARKUP_LANGS.test(filePath)) return prepareMarkup(text, sink);
+  return prepareCode(stripComments(text, LINE_COMMENT_LANGS.test(filePath)), sink);
+}
+
+// Appends each block and records where it landed. Callers that pass no sink get the
+// same string they always did.
+function appendBlocks(head, blocks, sink) {
+  let out = head;
+  for (const b of blocks) {
+    sink?.push({ at: out.length + 1, source: b.source });
+    out += `\n${b.text}`;
+  }
+  return out;
 }
 
 // Markup prose is unquoted, so running rules on the whole file would fire on a
 // paragraph that merely discusses `transition: all`. Only <style>, <script>, astro
-// frontmatter, and style="" attributes hold CSS; everything else is dropped.
-function prepareMarkup(text) {
+// frontmatter, and style="" attributes hold CSS.
+//
+// Those regions are kept AT THEIR ORIGINAL OFFSETS and everything else is blanked,
+// rather than extracted and joined. Joining discarded the offsets, so a defect on
+// source line 6 was reported as line 2 — the audit's whole contract is `file:line`.
+// Blanking is equivalent for matching (a rule cannot match whitespace) and keeps
+// the original as a byte-identical-length prefix of the result.
+//
+// What cannot stay in place is object-form CSS-in-JS and style="" attributes: their
+// declarations live in camelCase keys and quoted values that no rule matches raw, so
+// they still become synthetic `x{ ... }` blocks appended past the source. Findings
+// there report without a line, which is the honest answer — they have no single
+// source position. Dropping those blocks instead would silently retire every
+// block-scoped rule on a style attribute.
+// Where a match's body sits in the source, measured backwards from the end of the
+// match. One form for all three region kinds, and it stays right if the opening
+// pattern is ever edited — measuring forwards means restating the open tag's length
+// at each call site, and an offset that is wrong here does not fail loudly: it shifts
+// every later region, and the overlap guard then drops one whole, leaving real CSS
+// silently unchecked.
+const contentStart = (m, body, closeLen) => m.index + m[0].length - body.length - closeLen;
+
+function prepareMarkup(text, sink) {
   const src = text.replace(/<!--[\s\S]*?-->/g, blank);
-  const parts = [];
-  for (const m of src.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style/gi))
-    parts.push(blankStrings(stripComments(m[2], STYLE_LANG.test(m[1]))));
-  for (const m of src.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script/gi))
-    parts.push(prepareCode(stripComments(m[1], true)));
+  const regions = [];
+  const extra = [];
+
   const frontmatter = src.match(/^---\r?\n([\s\S]*?)^---/m);
-  if (frontmatter) parts.push(prepareCode(stripComments(frontmatter[1], true)));
+  if (frontmatter) {
+    const code = stripComments(frontmatter[1], true);
+    // Strings blanked in place exactly as in <script>: frontmatter is JS, and a quoted
+    // value there is content, not a declaration. styleObjectBlocks still reads the
+    // unblanked code — that is where those quoted values legitimately become CSS.
+    const start = contentStart(frontmatter, code, '---'.length);
+    regions.push({ start, code: blankStrings(code) });
+    for (const b of styleObjectBlocks(code)) extra.push({ text: b.text, source: start + b.at });
+  }
+  for (const m of src.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style/gi))
+    regions.push({
+      start: contentStart(m, m[2], '</style'.length),
+      code: blankStrings(stripComments(m[2], STYLE_LANG.test(m[1]))),
+    });
+  for (const m of src.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script/gi)) {
+    const code = stripComments(m[1], true);
+    const start = contentStart(m, m[1], '</script'.length);
+    regions.push({ start, code: blankStrings(code) });
+    for (const b of styleObjectBlocks(code)) extra.push({ text: b.text, source: start + b.at });
+  }
   for (const m of src.matchAll(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
     const css = m[1] ?? m[2];
-    if (css.trim()) parts.push(`x{ ${css} }`);
+    if (css.trim()) extra.push({ text: `x{ ${css} }`, source: m.index });
   }
-  return parts.join('\n');
+
+  let out = '';
+  let at = 0;
+  for (const r of regions.sort((a, b) => a.start - b.start)) {
+    if (r.start < at) continue; // nested or overlapping — the outer region already covers it
+    out += blank(src.slice(at, r.start)) + r.code;
+    at = r.start + r.code.length;
+  }
+  out += blank(src.slice(at));
+  // Source order, so a sink entry's `at` rises with its `source` and a lookup can stop
+  // at the first block past the index it is resolving.
+  extra.sort((a, b) => a.source - b.source);
+  return appendBlocks(out, extra, sink);
 }
 
-function prepareCode(code) {
-  return [blankStrings(code), ...styleObjectBlocks(code)].join('\n');
+function prepareCode(code, sink) {
+  const blocks = styleObjectBlocks(code).map((b) => ({ text: b.text, source: b.at }));
+  return appendBlocks(blankStrings(code), blocks, sink);
 }
 
 // --- comments and strings -------------------------------------------------------
@@ -150,6 +219,8 @@ function skipString(text, i) {
 const PAIR =
   /(?:"([^"\n]+)"|'([^'\n]+)'|([A-Za-z_$][\w$]*))\s*:\s*(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|(-?(?:\d+\.?\d*|\.\d+)))/g;
 
+// Returns `{ text, at }` — `at` is where the object literal starts in `code`, which is
+// the line the author edits and the line a `csspro-ignore` marker sits above.
 function styleObjectBlocks(code) {
   // Built per call, not shared: scanObject drives lastIndex by hand, so a module-level
   // regex would carry a position into the next call.
@@ -191,6 +262,6 @@ function scanObject(code, start, blocks) {
     const key = p[3] ? p[3].replace(/[A-Z]/g, (u) => '-' + u.toLowerCase()) : (p[1] ?? p[2]);
     decls += `${key}: ${p[4] ?? p[5] ?? p[6]}; `;
   }
-  if (decls) blocks.push(`x{ ${decls}}`);
+  if (decls) blocks.push({ text: `x{ ${decls}}`, at: start });
   return i;
 }
