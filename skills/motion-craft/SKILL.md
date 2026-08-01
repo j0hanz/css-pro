@@ -11,9 +11,9 @@ Holding a description but not the name — "bouncy thing when the popover opens"
 
 ## The decision engine
 
-Four constraints every animation satisfies before it ships. Any order.
+Four constraints every animation satisfies before it ships — **frequency**, **purpose**, **easing**, **duration**. Any order.
 
-**1. Should this animate at all?** Frequency user sees it decides almost everything: motion on daily-repeated thing feels slow, delayed, disconnected. Raycast ships no open/close animation — correct for something used hundreds times a day. Count deliberate actions; a pointer passing over a hover target is incidental, gated by the hover rule under Accessibility rather than counted here.
+**Frequency — should this animate at all?** How often the user sees it decides almost everything: motion on daily-repeated thing feels slow, delayed, disconnected. Raycast ships no open/close animation — correct for something used hundreds times a day. Count deliberate actions; a pointer passing over a hover target is incidental, gated by the hover rule under Accessibility rather than counted here.
 
 | Frequency                                                   | Decision                     |
 | ----------------------------------------------------------- | ---------------------------- |
@@ -22,9 +22,9 @@ Four constraints every animation satisfies before it ships. Any order.
 | 1–9 times/day (modals, drawers, toasts)                     | Standard animation           |
 | Less than daily (onboarding, feedback, celebrations)        | Can add delight              |
 
-**2. What's the purpose?** Every animation needs one: **spatial consistency** (toast enter/exit same edge, swipe-to-dismiss feels intuitive), **state indication** (morphing feedback button shows change), **explanation** (marketing animation showing feature works), **feedback** (button scales down on press, confirms interface heard user), or **preventing jarring change** (elements appear/vanish with no bridge feel broken). "Looks cool" not on list — if that's only purpose and user sees it often, skip.
+**Purpose — what is it for?** Every animation needs one: **spatial consistency** (toast enter/exit same edge, swipe-to-dismiss feels intuitive), **state indication** (morphing feedback button shows change), **explanation** (marketing animation showing feature works), **feedback** (button scales down on press, confirms interface heard user), or **preventing jarring change** (elements appear/vanish with no bridge feel broken). "Looks cool" not on list — if that's only purpose and user sees it often, skip.
 
-**3. What easing?** Decide by what element does. Entering/exiting → `ease-out` (fast start, feels responsive). Moving/morphing on screen → `ease-in-out` (natural accel then decel). Hover/color change → `ease`. Constant motion (marquee, progress bar) → `linear`, and any loop running past 5s ships a visible pause/stop control (WCAG 2.2.2). Default → `ease-out`.
+**Easing — which curve?** Decide by what element does. Entering/exiting → `ease-out` (fast start, feels responsive). Moving/morphing on screen → `ease-in-out` (natural accel then decel). Hover/color change → `ease`. Constant motion (marquee, progress bar) → `linear`, and any loop running past 5s ships a visible pause/stop control (WCAG 2.2.2). Default → `ease-out`.
 
 Built-in CSS easings too weak for deliberate motion — lack punch that makes animation feel intentional. Use strong custom curves, keep as tokens:
 
@@ -36,7 +36,7 @@ Built-in CSS easings too weak for deliberate motion — lack punch that makes an
 
 `ease-out` on every UI interaction: motion covers most ground in the first frames, exact moment user watches most closely, so 200ms `ease-out` dropdown _feels_ faster than same 200ms on a slow-starting curve. Tokens above are the default set; when a curve needs more punch than they carry, pull a stronger variant from [easing.dev](https://easing.dev/).
 
-**4. How fast?** Most UI animations stay under 300ms — 180ms dropdown feels more responsive than 400ms one, faster-spinning spinner makes app feel it loads faster even when load time same. Modals and drawers sit outside that bar: bigger surface, longer travel, 200–500ms.
+**Duration — how fast?** Most UI animations stay under 300ms — 180ms dropdown feels more responsive than 400ms one, faster-spinning spinner makes app feel it loads faster even when load time same. Modals and drawers sit outside that bar: bigger surface, longer travel, 200–500ms.
 
 | Element                  | Duration      |
 | ------------------------ | ------------- |
@@ -138,11 +138,12 @@ Motion / Framer Motion needs the same branch in JS — `useReducedMotion()` reci
 
 Every line true before animation ships. Conditional lines pass untouched when condition absent. The provable ones are checked rather than recalled — the per-edit hook refuses `transition: all` and layout-property transitions outright, and `node "${CLAUDE_PLUGIN_ROOT}/skills/css-audit/audit.mjs" <file>` re-runs the table over a whole sheet with `file:line`. Run it on the file you animated; judge feel yourself.
 
-- All four decision-engine constraints settled: animates or not, purpose named, easing picked, duration picked.
-- Easing is an `--ease-*` token, or `ease`/`linear` where Q3 assigns them; duration inside the band for that element type.
+- All four decision-engine constraints settled: frequency, purpose, easing, duration.
+- Easing is an `--ease-*` token, or `ease`/`linear` where **Easing** assigns them; duration inside the band for that element type.
 - Every animated property named explicitly, `transform` and `opacity` by default; anything else priced against the exceptions above.
 - `transform-origin` matches the surface: trigger-anchored → trigger, modal → center.
 - Driver matches the trigger: transition for discrete state change, spring for continuous gesture.
+- `transform` set direct on the moving element — no custom property on a parent driving a child, no Motion / Framer Motion `x`/`y`/`scale` shorthand where a full `transform` string hands the animation to WAAPI.
 - Entrances start at `scale(0.9)` or higher, paired with opacity.
 - Pressable elements carry press feedback — `scale(0.95–0.98)` on `:active`.
 - `prefers-reduced-motion` branch written: opacity and color kept, movement dropped — including `scroll-behavior: auto` if the sheet sets `smooth` anywhere.

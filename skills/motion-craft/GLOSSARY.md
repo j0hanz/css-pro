@@ -31,7 +31,7 @@ Reverse-lookup table: vague description ("bouncy thing when popover opens") → 
 - **Morph** — One shape smoothly turns into another, e.g. Dynamic Island.
 - **Shared element transition** — Element travels and transforms from one position to another, like thumbnail expanding into card. (vs **Layout animation**: animates element's own size/position change — shared element transition implies same element appearing two places. Motion / Framer Motion's own API name, "shared layout animation", covers both.)
 - **Layout animation** — Element size or position changes, animates to new spot instead of snapping.
-- **Accordion / Collapse** — Section expands/collapses to show or hide content. Hook refuses `transition: height`; animate `transform` or `clip-path` instead. Intrinsic-height path (`calc-size()`, css-craft `FUNCTIONS.md`, Chromium-only) runs through that same refused write.
+- **Accordion / Collapse** — Section expands/collapses to show or hide content. (What to animate instead of `height`: css-craft's `FUNCTIONS.md`, `calc-size()`.)
 - **Direction-aware transition** — Content slides one way going forward, opposite going back. Navigation gets sense of direction.
 
 ## Scroll
@@ -56,16 +56,14 @@ Reverse-lookup table: vague description ("bouncy thing when popover opens") → 
 
 Names only; numbers, formulas and mapping between spring APIs in [`PHYSICS.md`](PHYSICS.md).
 
-- **Bounce** — Motion's overshoot parameter. (Mapping to damping ratio in [`PHYSICS.md`](PHYSICS.md).)
-- **Damping ratio** — Overshoot control. `1.0` settles with no bounce; below that, oscillates.
-- **Response** — How fast spring reach target, in seconds. (vs **duration**: spring has no fixed duration — response a parameter, settle time emerges from it.)
+- **Bounce** — Motion's overshoot parameter. (vs **Damping ratio**: Apple's name for the same axis, inverted — mapping in [`PHYSICS.md`](PHYSICS.md).)
+- **Damping ratio** — Overshoot control: higher settles clean, lower oscillates.
+- **Response** — How fast spring reach target. (vs **duration**: spring has no fixed duration — response a parameter, settle time emerges from it.)
 - **Perceptual duration** — How long spring feels finished, though keeps micro-settling underneath.
 - **Velocity handoff** — Pointer-release velocity handed to spring as initial velocity, so drag and animation share one seam.
 - **Momentum projection** — Resting position predicted from release velocity, then snapped to nearest target.
 
 ## Looping & Ambient Motion
-
-Give every loop running past 5s a pause/stop control (WCAG 2.2.2) — covers all below.
 
 - **Marquee** — Text/content scrolling continuously in loop.
 - **Alternate (yoyo)** — Loop plays forward then reverses each iteration, instead of jumping back to start.

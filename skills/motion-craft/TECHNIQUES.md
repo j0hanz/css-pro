@@ -188,7 +188,7 @@ element.animate([{ clipPath: 'inset(0 0 100% 0)' }, { clipPath: 'inset(0 0 0 0)'
 }
 ```
 
-**Cohesion** — match motion to the component's personality. Playful component can be bouncier; professional dashboard crisp and fast. Sonner read elegant because easing, duration and toast design pull one direction: `ease` rather than `ease-out`, a touch slower than typical UI. For entering/exiting lists, pair the opacity change with `translateY` on the row and let siblings reflow — the hook refuses `transition: height`, and the intrinsic-size path (`calc-size()`, css-craft `FUNCTIONS.md`, Chromium-only) runs through that same refused write.
+**Cohesion** — match motion to the component's personality. Playful component can be bouncier; professional dashboard crisp and fast. Sonner read elegant because easing, duration and toast design pull one direction: `ease` rather than `ease-out`, a touch slower than typical UI. For entering/exiting lists, pair the opacity change with `translateY` on the row and let siblings reflow — height is not animatable under this plugin (css-craft's `FUNCTIONS.md`, `calc-size()`).
 
 **Asymmetric enter/exit timing** — rule and timings in [`SKILL.md`](SKILL.md). Recipe:
 

@@ -1,6 +1,6 @@
 ---
 name: css-audit
-description: Audit a whole stylesheet (CSS/SCSS/Sass/Less), or review a CSS or motion diff — re-reading existing code for defects the per-edit hook never re-checks: cleaning up legacy CSS, inheriting a sheet. Not the mechanics — css-craft owns CSS mechanics, motion-craft owns motion decisions.
+description: Audit a whole stylesheet (CSS/SCSS/Sass/Less), or review a CSS or motion diff — cleaning up legacy CSS, inheriting a sheet, checking the styles in a PR. Not the mechanics — css-craft owns CSS mechanics, motion-craft owns motion decisions.
 ---
 
 # CSS Audit
@@ -43,16 +43,13 @@ Three groups, highest impact first. BLOCK and ADVISE messages are full sentences
 
 **ADVISE** — measurable cost or accessibility risk, often intentional (handled globally, or a known trade-off). Capped to three on a write; the audit lists every occurrence with its line.
 
-**WHOLE-FILE** — only visible at file scale; the script names each finding and prints its line. What to do:
+**WHOLE-FILE** — only visible at file scale. Each message names the finding, its line and its fix; below is what the message does not print — the threshold that made it fire, and how to dispose of it.
 
-- _Empty rule_ — delete it, or fill it if it was meant to hold declarations.
-- _Duplicate block_ — same selector, same declarations; the later copy is dead. Delete it.
 - _Repeated declarations_ — two different selectors carrying the same declarations, in any order, under the same at-rule conditions. Merging them into one selector list, or onto a shared class, changes nothing a browser can observe. Fewer than two shared declarations is not reported.
 - _Overlapping declarations_ — the same, one declaration short of identical: a block copied from another and then drifted. Reported when the shared set is at least four declarations _and_ most of both blocks, so a long rule that merely agrees on some `font-*` lines does not fire.
-- _Redeclares an earlier block_ — a block that re-asserts the whole of an earlier one (every declaration, under the same conditions) then adds its own. The shared set is the earlier block in full, so the re-assertion is likely dead — this selector may already inherit that rule — or a copied component wanting a shared class. Fewer than five shared declarations stays an _Overlapping_ finding; a four-declaration reset fully inside a longer rule is usually a shared base, not a copied component.
-- _Mixes direction conventions_ — a note, not a finding, and it lists lines: this file uses both logical (`padding-inline-start`) and physical (`padding-left`) inline-axis properties, so the two flip apart under `direction: rtl`. Block-axis properties (`margin-top`, `bottom`) are not counted — they mean the same thing in every writing mode. Which convention the project wants is its own call. Nothing to dispose.
-- _Unused custom property_ — resolved across every sheet passed to the audit, so a prop read in a sibling sheet is not flagged. A remaining one is dead unless exported to a sheet you did not pass; confirm before deleting.
-- _Undefined custom property_ — resolved across every sheet passed. A remaining one is often a typo (`--color-primayr`), or lives in a sheet you did not pass.
+- _Redeclares an earlier block_ — the shared set is the earlier block in full, so the re-assertion is likely dead: this selector may already inherit that rule. Fewer than five shared declarations stays an _Overlapping_ finding; a four-declaration reset fully inside a longer rule is usually a shared base, not a copied component.
+- _Mixes direction conventions_ — a note, not a finding, and it lists lines. Block-axis properties (`margin-top`, `bottom`) are not counted — they mean the same thing in every writing mode. Which convention the project wants is its own call. Nothing to dispose.
+- _Unused / undefined custom property_ — with the run scoped wide enough (above), a remaining one is dead or a typo (`--color-primayr`). Confirm before deleting.
 
 ## Review — a diff
 
@@ -73,15 +70,13 @@ echo '{"tool_name":"Write","tool_input":{"file_path":"Button.tsx","content":"<ad
 
 The audit reads the whole file, so keep the findings whose line falls inside a changed hunk and drop the rest — those are the audit's business, not this review's. A stylesheet the diff touches that the audit reports as clean has no provable defects in it; say so rather than re-deriving it.
 
-Then read the diff for what the script cannot decide: a motion diff adds the "Flag these on sight" list below — motion-specific regressions the rule table does not name, plus feel. Default to flagging — unsure whether motion feels right, delete it. css-craft's "What bites" covers the mechanical gotchas behind the rest.
+Then read the diff for what the script cannot decide: a motion diff adds the motion bar below — motion-specific regressions the rule table does not name, plus feel. Default to flagging — unsure whether motion feels right, delete it. css-craft's "What bites" covers the mechanical gotchas behind the rest.
 
-The rule table is the authority for provable defects. Where it and the motion list overlap, report once: `transition: all` and layout-property transitions are BLOCK in the rule table; `ungated :hover` is ADVISE there; `prefers-reduced-motion` is ADVISE there but the motion verdict Blocks it — the motion tier wins.
+The rule table is the authority for provable defects. Where it and the motion bar overlap, report once: `transition: all` and layout-property transitions are BLOCK in the rule table; `ungated :hover` is ADVISE there; `prefers-reduced-motion` is ADVISE there but the motion verdict Blocks it — the motion tier wins.
 
-### Flag these on sight (motion)
+### The motion bar
 
-Pull the values this list cites from motion-craft's [`SKILL.md`](../motion-craft/SKILL.md) ([`TECHNIQUES.md`](../motion-craft/TECHNIQUES.md) for the blur ceiling and `will-change` scope); when feel can't be judged from code alone, say so and point at `## Debugging` in TECHNIQUES.md.
-
-`transition: all`; `scale(0)` or pure-fade entrances with no initial transform; `ease-in` on any UI interaction, or a built-in easing on entering/exiting or on-screen movement where an `--ease-*` token belongs (hover and colour changes keep `ease`); animation on a keyboard shortcut / command-palette toggle / high-frequency action; UI duration past motion-craft's bar with no stated reason (modals and drawers sit outside that bar); `transform-origin: center` on trigger-anchored popover/dropdown/tooltip; keyframes on toasts/toggles/anything added or triggered rapidly; animating layout properties (`width`/`height`/`margin`/`padding`/`top`/`left`); Framer Motion `x`/`y`/`scale` shorthands where a full `transform` string would hand the animation off; updating a CSS variable on parent to drive a child transform; missing `prefers-reduced-motion` handling on movement; ungated `:hover` motion; symmetric enter/exit timing on press-and-release or hold; everything-at-once entrance where a stagger belongs.
+Read every changed line against `## Done when` in motion-craft's [`SKILL.md`](../motion-craft/SKILL.md) — that list is the bar, and every line of it the diff misses is a finding. The values that list cites sit above it in the same file: the frequency table, the `--ease-*` tokens, the duration bands, the four decision-engine constraints. [`TECHNIQUES.md`](../motion-craft/TECHNIQUES.md) holds the blur ceiling and `will-change` scope; when feel can't be judged from code alone, say so and point at its `## Debugging`.
 
 ### Output format
 
@@ -98,4 +93,4 @@ Two parts.
 
 **Part 2 — Verdict.** Group remaining commentary by impact, highest first. Close with an explicit decision. **Block** on a provable defect — a rule-table BLOCK, or a measurable motion defect (non-GPU animation with an easy GPU fix, missing `prefers-reduced-motion` on movement) — or, in a motion review, a design judgment: feel-breaking regression, animation on a keyboard/high-frequency action, `scale(0)` or `ease-in` on UI. Say which kind each blocking item is. **Approve** when every provable defect is cleared and, for motion, feel holds — durations/easing within bounds, interruptibility handled, reduced-motion respected, nothing left worth deleting. Cite `file:line`.
 
-**Done when** the checks above have been run and their output quoted, every changed line measured against the bar (and the motion list, plus feel, if motion), every provable defect flagged with `file:line`, and a Block/Approve verdict closes. ADVISE findings are reported in the table, not disposed — a review is lighter than an audit. A review that never ran the script is not done, however careful the reading was.
+**Done when** the checks above have been run and their output quoted, every changed line measured against the bar (and the motion bar, plus feel, if motion), every provable defect flagged with `file:line`, and a Block/Approve verdict closes. ADVISE findings are reported in the table, not disposed — a review is lighter than an audit. A review that never ran the script is not done, however careful the reading was.
