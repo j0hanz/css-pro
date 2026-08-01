@@ -1,10 +1,10 @@
 # Shorthand
 
-**Shorthands** set many properties one declaration — `margin: 10px 5px`, `border: 1px solid black`. Compress longhand sprawl one line. File cover: reset trap, value-count rules, per-property order high-traffic shorthands. Value naming: see [`PROPERTIES.md`](PROPERTIES.md). Process: see [`SKILL.md`](SKILL.md).
+**Shorthands** set many properties one declaration — `margin: 10px 5px`, `border: 1px solid black`. Compress longhand sprawl one line. File cover: reset trap, value-count rules, per-property order high-traffic shorthands.
 
 ## The reset trap (read this first)
 
-Shorthands **reset** every longhand they cover to that longhand's _initial_ value. Omitted values not preserved — wiped to default. Rule that bites.
+Shorthands **reset** every longhand they cover to that longhand's _initial_ value. Omitted values not preserved — wiped to default.
 
 ```css
 p {
@@ -15,13 +15,13 @@ p {
 
 Shorthand `background` reset `background-color` to `transparent`, omitted. Consequences, fixes:
 
-- **Shorthand after longhand wipes longhand** — put kept longhand _after_ shorthand, or fold into shorthand.
+- **Shorthand after longhand wipes longhand** — declare kept longhand _after_ shorthand. Fold into shorthand instead when shorthand sets every longhand you care about anyway.
 - **Longhand after shorthand survives** — `background: url(...) no-repeat; background-color: red;` keep red.
 - **Can't inherit one longhand by omission** — `inherit` applies whole property or not at all. Inherit single longhand: use that longhand with `inherit`, not shorthand.
 - **Order across rules matters too** — later rule's shorthand reset what earlier rule's longhand set.
-- **Compound shorthands reset hard** — `grid` reset `grid-template-*` _and_ `grid-auto-flow`, `-columns`, `-rows`. `flex` reset `flex-grow`, `-shrink`, `-basis`. `border` reset `border-width`, `-style`, `-color` _and_ per-side `border-*`. Use only when meaning set every longhand covered.
+- **Compound shorthands reset hard** — `grid` reset `grid-template-*` _and_ `grid-auto-flow`, `-columns`, `-rows`. `flex` reset `flex-grow`, `-shrink`, `-basis`. `border` reset `border-width`, `-style`, `-color`, per-side `border-*` _and_ `border-image` to `none` — `border` can't express an image, so prior `border-image` silently goes.
 
-Reach for shorthand only when meaning set (or accept initial for) every longhand it covers. Keep prior longhand untouched: don't shorthand it — use longhand, or set kept value after.
+Reach for shorthand when meaning set (or accept initial for) every longhand it covers.
 
 ## Value-count syntax — box sides: TRBL
 
@@ -47,24 +47,24 @@ Corner shorthands (`border-radius`) take 1–4 values, clockwise from top-left:
 | `border-radius: 1em 2em 3em`     | top-left, top-right + bottom-left, bottom-right       |
 | `border-radius: 1em 2em 3em 4em` | top-left, top-right, bottom-right, bottom-left        |
 
-Sides, corners use _same_ 1/2/3/4 pattern, different start points — sides top, corners top-left. Don't confuse.
+Sides, corners use _same_ 1/2/3/4 pattern, different start points — sides top, corners top-left.
 
 `/` splits horizontal from vertical radii, elliptical corners: `border-radius: 50% / 25%` = 50% horizontal, 25% vertical.
 
 ## The `/` separator
 
-Several shorthands use `/` split two value groups — learn slash, not just order:
+Several shorthands use `/` split two value groups:
 
 - `background` — `position / size`
 - `border-radius` — `horizontal / vertical`
-- `border-image` — `slice / width / outset` (up to three slashes)
+- `border-image` — `source slice / width / outset repeat` (two slashes max)
 - `grid-area`, `grid-row`, `grid-column` — `start / end`
 
 ## Per-property order and rules
 
 ### `background`
 
-`color image repeat attachment position` — where value types differ, order flexible. One hard rule: `position` before `/size`. `background-size` no standalone slot — set as `position / size`, or `background-size` longhand after. Omitted longhands **reset**, shorthand `background` wipes prior `background-color` unless restated.
+`color image repeat attachment position` — where value types differ, order flexible. One hard rule: `position` before `/size`. `background-size` no standalone slot — set as `position / size`, or `background-size` longhand after.
 
 ```css
 background: #fff url('bg.gif') no-repeat fixed center top / cover;
@@ -72,7 +72,7 @@ background: #fff url('bg.gif') no-repeat fixed center top / cover;
 
 ### `font`
 
-`style weight variant size/line-height family` — `font-size`, `font-family` required; rest default `normal` if omitted. `line-height` joins `font-size` with `/`. Style/weight/variant before size; family last. Omitted longhands reset: `font-variant`, `font-stretch`, `font-size-adjust` snap `normal` / `none`.
+`style weight variant size/line-height family` — `font-size`, `font-family` required; rest default `normal` if omitted. `line-height` joins `font-size` with `/`. Style/weight/variant before size; family last. Omitted `line-height` the one that bites — snaps back to `normal`, so `font: 1em Arial` after `line-height: 1.5` loses the 1.5. Same wipe hits `font-kerning`, `font-optical-sizing`, `font-feature-settings`, `font-variation-settings`, `font-language-override`, `font-stretch`, `font-size-adjust`, every `font-variant-*`.
 
 ```css
 font:
@@ -82,7 +82,7 @@ font:
 
 ### `border`
 
-`width style color` — `border-style` required or nothing renders; width, color default if omitted (`medium`, `currentcolor`). Per-side: `border-top`, `-right`, `-bottom`, `-left`. `border` also resets every per-side `border-*` longhand.
+`width style color` — `border-style` required or nothing renders; width, color default if omitted (`medium`, `currentcolor`). Per-side: `border-top`, `-right`, `-bottom`, `-left`.
 
 ```css
 border: 1px solid var(--color-border);
@@ -90,7 +90,7 @@ border: 1px solid var(--color-border);
 
 ### `animation`
 
-`duration timing-function delay iteration-count direction fill-mode play-state name` — no value syntactically required (every omitted longhand reset to initial — `duration` to `0s`, `name` to `none`), visible animation needs both duration, name. First `<time>` duration, second delay. Duration first so two times not misread.
+`duration timing-function delay iteration-count direction fill-mode play-state name` — no value syntactically required (every omitted longhand reset to initial — `duration` to `0s`, `name` to `none`), visible animation needs both duration, name. First `<time>` duration, second delay. Duration first so two times not misread. Also resets `animation-timeline` to `auto` and `animation-range-start` / `-end` to `normal`, so a prior `animation-timeline: scroll()` or `animation-range-start: 20%` goes — set them after the shorthand. Leaves `animation-composition` alone.
 
 ```css
 animation: 0.3s ease-in 0.1s 2 forwards slide-in;
@@ -98,7 +98,7 @@ animation: 0.3s ease-in 0.1s 2 forwards slide-in;
 
 ### `transition`
 
-`property duration timing-function delay` — first `<time>` duration, second delay. Multiple transitions comma-separated.
+`property duration timing-function delay || <transition-behavior>` — five longhands. First `<time>` duration, second delay. Multiple transitions comma-separated. Omitted behaviour resets `transition-behavior` to `normal`, which drops discrete properties: `transition: display 1s allow-discrete` to carry `display` through. Chrome 117 / Safari 17.4 / Firefox 129.
 
 ```css
 transition:
@@ -112,11 +112,11 @@ transition:
 
 | Values           | Meaning                                                                              |
 | ---------------- | ------------------------------------------------------------------------------------ |
-| `flex: 1`        | `grow 1`, `shrink 1`, `basis 0`                                                      |
+| `flex: 1`        | `grow 1`, `shrink 1`, `basis 0%`                                                     |
 | `flex: 1 2`      | `grow 1`, `shrink 2` (second a number) **or** `grow 1`, `basis 2em` (second a width) |
 | `flex: 1 2 10em` | `grow 1`, `shrink 2`, `basis 10em`                                                   |
 
-Single number sets grow; single width sets basis. Keywords set all three: `flex: auto` = `1 1 auto`, `flex: none` = `0 0 auto`.
+Single number sets grow, basis `0%` — percentage, not `0px`, and the two differ once the container's main size is indefinite. Single width sets basis. Keywords set all three: `flex: auto` = `1 1 auto`, `flex: none` = `0 0 auto`.
 
 ### `gap` / `grid` / `place-*`
 
@@ -124,7 +124,7 @@ Single number sets grow; single width sets basis. Keywords set all three: `flex:
 
 ### `grid-area`
 
-`row-start / column-start / row-end / column-end` — omit `column-start`, copies `row-start`; use `span N` for end N tracks from start.
+`row-start / column-start / row-end / column-end` — omitted `column-start` copies `row-start` only when `row-start` is a `<custom-ident>` (named line); otherwise `auto`. Same condition governs each omitted `*-end`. So `grid-area: main` = `main / main / main / main`, `grid-area: 2` = `2 / auto / auto / auto`. Use `span N` for end N tracks from start.
 
 ```css
 grid-area: 1 / 2 / span 2 / span 3;
@@ -132,4 +132,4 @@ grid-area: 1 / 2 / span 2 / span 3;
 
 ### `grid` / `grid-template`
 
-`grid` heavyweight: sets `grid-template-rows`, `-columns`, `-areas` _and_ resets `grid-auto-flow`, `-rows`, `-columns`. Prefer `grid-template-rows/columns` (no auto reset) unless want reset. `grid-template` takes `rows / columns` or `rows / columns / areas`.
+`grid` heavyweight: sets `grid-template-rows`, `-columns`, `-areas`, plus the auto-placement reset above. Prefer `grid-template-rows/columns` unless want that reset. `grid-template` takes `rows / columns` or `rows / columns / areas`.

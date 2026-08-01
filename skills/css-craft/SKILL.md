@@ -1,34 +1,33 @@
 ---
 name: css-craft
-description: Use when writing or refactoring CSS — custom properties and var(), shorthand and the reset trap, intrinsic layout, and the modern value-function long tail (clamp/calc-size/if/linear/shape/image-set) with its support traps. Not a house style.
+description: CSS mechanics — use when a declaration silently does nothing (var() not resolving, shorthand wiping the longhands it omits, an unregistered custom property refusing to interpolate), when writing custom properties, shorthand, intrinsic layout, or value functions like calc-size()/color-mix(), or when reviewing a CSS diff. Not motion — duration, easing, and whether to animate are motion-craft.
 ---
 
 # CSS Craft
 
-How CSS actually behave, in place it behave surprising. Mechanics only — rules browser enforce whether you know or not. Naming, taxonomy, house style stay yours.
-
-Four **leading words**:
-
-- **custom property** — named value (`--color-danger`) read back with `var()`.
-- **shorthand** — one declaration setting several properties (`margin: 10px 5px`).
-- **reset** — what shorthand does to every longhand it omits: snaps to initial value. Trap that make declaration order matter.
-- **function** — value computed at render time (`clamp()`, `color-mix()`, `anchor()`) rather than hardcoded.
+How CSS actually behave, in place it behave surprising. Mechanics only — rules browser enforce whether you know or not.
 
 ## Reference bodies
 
-Open one work need:
+- Writing or debugging a custom property → [`PROPERTIES.md`](PROPERTIES.md): scope and cascade, `@property` typing and animation, fallback rules, three computation gotchas behind "why is my value missing", re-pointing values per media query, fluid `clamp()` recipes, theming, JS read and write.
+- Writing a shorthand, or a longhand sitting near one → [`SHORTHAND.md`](SHORTHAND.md): reset trap in full, value counts for sides (TRBL) and corners, value order for `background` / `font` / `border` / `animation` / `transition` / `flex` / `grid-area`.
+- Building layout, or about to write a media query → [`LAYOUT.md`](LAYOUT.md): intrinsic grid, grid-area stacking, sidebar, sticky footer, centering; container queries and style queries; one-line upgrades retiring old hacks (`aspect-ratio`, `text-wrap: balance`, `accent-color`); `:where()` / `:is()` / `:has()` / `@layer` / owl spacing.
+- Picking a value function, or feature-detecting one → [`FUNCTIONS.md`](FUNCTIONS.md): `calc-size()`, `progress()`, `color-mix()`, `contrast-color()`, `if()`, `image-set()`, the shape functions behind `clip-path` / `offset-path` (`inset` `xywh` `rect` `polygon` `path` `shape` `ray`), with the support trap on each one that still carries one; `@supports` and `CSS.supports()` syntax; fallback ordering.
 
-- [`PROPERTIES.md`](PROPERTIES.md) — custom properties end to end: scope and cascade, `@property` typing and animation, fallbacks, three computation gotchas that produce "why is my value missing", responsive re-pointing, container queries, theming, reading and writing from JS.
-- [`SHORTHAND.md`](SHORTHAND.md) — value-count rules for sides (TRBL) and corners, order values take in `background`/`font`/`border`/`animation`/`transition`/`flex`/`grid`, and reset trap in full.
-- [`LAYOUT.md`](LAYOUT.md) — intrinsic grid and flex patterns, one-line upgrades that retire old hacks (`aspect-ratio`, `text-wrap: balance`, `accent-color`), and `:where()` / `:has()` / `@layer`.
-- [`FUNCTIONS.md`](FUNCTIONS.md) — picking value function by intent, and trap that keeps each one correct.
+## What bites
 
-## The four things that bite
+Before a declaration ships, confirm none of these apply to it. Each is a symptom you would otherwise chase in the browser.
 
-**Shorthand resets what it omits.** `background: red` clears `background-image`, `background-position`, rest. Longhand set _before_ shorthand gets discarded. Fold it in, or declare after. Full per-property detail in [`SHORTHAND.md`](SHORTHAND.md).
+**Shorthand resets what it omits.** `background: red` clears `background-image`, `background-position`, rest. Longhand set _before_ shorthand gets discarded. Declare kept longhand _after_ shorthand; fold it into shorthand only when shorthand sets every longhand you care about anyway. Full per-property detail in [`SHORTHAND.md`](SHORTHAND.md).
 
-**Invalid `var()` cannot fall back to earlier declaration.** Those discarded at parse time, property falls to inherited or initial value instead — `color: blue; color: var(--broken)` gives inherited colour, not blue. Give every `var()` fallback of right type. See computation gotchas in [`PROPERTIES.md`](PROPERTIES.md).
+**Invalid `var()` cannot fall back to earlier declaration.** Those discarded at parse time, property falls to inherited or initial value instead — `color: blue; color: var(--broken)` gives inherited colour, not blue. Give every `var()` fallback of right type, knowing it rescues the _missing_ token only: token that exists but is wrong for the consuming property substitutes anyway and the property still goes invalid. `var(--foo, red, blue)` is one fallback of `red, blue` — everything after first comma is the fallback. See computation gotchas in [`PROPERTIES.md`](PROPERTIES.md).
 
-**Untyped custom property cannot be interpolated.** Plain `--stop: red` snaps between values; same property registered with `@property` and `syntax: '<color>'` transitions smooth. Register anything you put in `transition` or `@keyframes`.
+**Untyped custom property cannot be interpolated.** Plain `--stop: red` snaps between values; same property registered with `@property` and `syntax: '<color>'` transitions smooth. Register anything you put in `transition` or `@keyframes` — with one exemption: component API prop meant to stay _undefined_ keeps `var(--button-bg, var(--color-primary))` fallthrough only while unregistered, because registration fills `initial-value`.
 
 **Computed values frozen on inheritance.** `--size-lg: calc(2 * var(--size))` on `:root` computes once; redefining `--size` on descendant won't recompute it. Do arithmetic where value consumed.
+
+**Unlayered styles beat every layer.** One stray rule outside `@layer` outranks your whole layered design system, and `!important` inverts the order on top of that. Full ordering in [`LAYOUT.md`](LAYOUT.md).
+
+**`minmax(20ch, 1fr)` overflows.** The memorised intrinsic-grid line needs the inner `min()` — `repeat(auto-fit, minmax(min(100%, 20ch), 1fr))` — else any container narrower than `20ch` overflows. Recipe in [`LAYOUT.md`](LAYOUT.md).
+
+**`@supports` cannot detect at-rules cross-engine.** `@supports at-rule(@container)` is Chromium 148+ only; probe API presence from JS — `window.CSSContainerRule` for `@container`, `window.CSSLayerBlockRule` for `@layer`. And a pass proves only the form you tested — partial implementations accept the function name and fail the call, so test the exact call you ship.

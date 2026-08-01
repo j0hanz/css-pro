@@ -1,14 +1,12 @@
 # How motion should feel
 
-Physics of motion feel — Apple _Designing Fluid Interfaces_ (WWDC 2018), ported to web (CSS, Pointer Events, `requestAnimationFrame`, spring libs like Motion / Framer Motion). File descriptive physics; `motion-craft` own prescriptive bar (durations, bounce values, when to animate).
+Physics of motion feel — Apple _Designing Fluid Interfaces_ (WWDC 2018), ported to web (CSS, Pointer Events, `requestAnimationFrame`, spring libs like Motion / Framer Motion). File descriptive physics; [`SKILL.md`](SKILL.md) own prescriptive bar — "The decision engine" for whether and how fast, "Springs" for bounce values.
 
 Through-line: **interface feel alive when motion start from current on-screen value, inherit user velocity, project momentum forward, and grabbed/reversed any instant.** Springs make natural — inherently interruptible, velocity-aware.
 
-Interface fluid when act like physical world: respond instant, move continuous, carry momentum, resist at boundaries, redirect mid-motion.
-
 ## Response and direct manipulation
 
-Moment lag appear, directness "falls off cliff"; response foundation for everything else. Respond on pointer-_down_, not release — highlight button instant pressed; waiting for `click`/touch-up feel dead. Audit every latency on input path (debounces, artificial timers, ~300ms tap delay) — anything non-essential regression. Feedback must continuous _during_ interaction, not just end: drag, slider, drawer update 1:1 with pointer whole way.
+Moment lag appear, directness "falls off cliff"; response foundation for everything else. Respond on pointer-_down_, not release — highlight button instant pressed; waiting for `click`/touch-up feel dead. Audit every latency on input path (debounces, artificial timers) — anything non-essential regression. Feedback must continuous _during_ interaction, not just end: drag, slider, drawer update 1:1 with pointer whole way.
 
 When user drag thing, must stay glued to finger, respect offset from _where grabbed_ — snapping to element center on grab break illusion. Use Pointer Events with `setPointerCapture` so tracking continue when pointer leave element bounds, keep short velocity/position history (last few `pointermove` events) for velocity at release.
 
@@ -24,7 +22,7 @@ el.addEventListener('pointerdown', (e) => {
 
 Thought and gesture happen parallel. Every animation must interruptible, redirectable any moment — user must grab moving element mid-flight, reverse without waiting for finish. Closing modal grabbed again should follow finger, not finish closing then reopen.
 
-Mechanics that make work: never lock out input during transition; always animate from _presentation_ (current on-screen) value, never target — starting from logical/target value on interrupt cause visible jump. Springs animate from current value by default, exact what interruption need. When gesture reverse, _blend_ velocity rather than hard-cut — replacing one animation with another at reversal make velocity discontinuity, "brick wall" (iOS _additive animation_ native; web, pick spring lib that re-targets from current velocity). Decompose 2D motion into independent X and Y springs — single spring on 2D distance desync when X and Y different velocities.
+Mechanics that make work: input stay live through transition; animate from _presentation_ (current on-screen) value, so interrupt continue from where pixels are — no jump. Springs animate from current value by default, exact what interruption need. When gesture reverse, _blend_ velocity rather than hard-cut — replacing one animation with another at reversal make velocity discontinuity, "brick wall" (iOS _additive animation_ native; web, pick spring lib that re-targets from current velocity). Decompose 2D motion into independent X and Y springs — single spring on 2D distance desync when X and Y different velocities.
 
 ## Springs: behavior over animation
 
@@ -35,19 +33,21 @@ Apple deliberately replaced physics triplet (mass/stiffness/damping) with two de
 - **Damping ratio** — control overshoot. `1.0` = critically damped, no bounce, smooth settle. `< 1.0` = overshoot and oscillate; lower = bouncier.
 - **Response** — how fast value reach target, in seconds. Lower = snappier. **Not "duration"** — spring no fixed duration; settle time emerge from parameters.
 
-Apple shipped values:
+Two damping numbers Apple actually ship in that talk: `1.0` for tap-to-present Now Playing (critically damped, no overshoot), `0.8` for swipe-to-dismiss (slight overshoot where gesture carry velocity).
 
-| Interaction                  | Damping | Response |
-| ---------------------------- | ------- | -------- |
-| Move / reposition (e.g. PiP) | `1.0`   | `0.4`    |
-| Rotation                     | `0.8`   | `0.4`    |
-| Drawer / sheet               | `0.8`   | `0.3`    |
+Motion / Framer Motion parameterise same spring differently — map explicit:
 
-Motion / Framer Motion `bounce` + `duration` spring API map closely to Apple damping + response. For prescriptive default config (when use bounce, which duration), see `motion-craft`.
+| Apple         | Motion / Framer Motion | Note                                                          |
+| ------------- | ---------------------- | ------------------------------------------------------------- |
+| Damping ratio | `bounce`               | `bounce ≈ 1 − damping ratio`; damping `1.0` → bounce `0`      |
+| Response      | `visualDuration`       | seconds to visually reach target (Motion 11.12.0+)            |
+| —             | `duration`             | whole spring incl. settle tail — longer than response, not it |
+
+For prescriptive default config (when use bounce, which duration), see "Springs" in [`SKILL.md`](SKILL.md).
 
 ## Velocity handoff — the seam between drag and animation
 
-When gesture end, animation must continue at finger exact velocity — no visible seam between dragging and animating. This detail most separate "fluid" from "fine." Pass pointer release velocity as spring initial velocity. Some APIs want _relative_ velocity — normalize by remaining distance to target:
+When gesture end, animation must continue at finger exact velocity — no visible seam between dragging and animating. Pass pointer release velocity as spring initial velocity. Some APIs want _relative_ velocity — normalize by remaining distance to target:
 
 ```
 relativeVelocity = gestureVelocity / (targetValue − currentValue)
@@ -57,7 +57,7 @@ Element at `y=50`, target `y=150` (100px to go), finger moving 50px/s → initia
 
 ## Momentum projection — animate to where the gesture is going
 
-Small input, big output. Don't snap to nearest boundary from _release point_; use velocity project resting position — like scroll deceleration — then snap to target nearest projected point. That what make flick feel like throw. Apple exact projection function:
+Small input, big output. Use velocity project resting position — like scroll deceleration — then snap to target nearest projected point. That what make flick feel like throw. Apple exact projection function:
 
 ```js
 // decelerationRate ≈ 0.998 for normal scroll feel; 0.99 for snappier
@@ -73,7 +73,7 @@ Physics-textbook `v²/(2·decel)` _not_ what Apple ship — use exponential-deca
 
 ## Spatial consistency — symmetric paths, anchored origins
 
-Enter and exit along same path; anchor interactions to source — see `motion-craft` for origin mechanic. Mirror easing on reversible transitions so outbound path match return (inverse cubic-bézier control points two directions).
+Enter and exit along same path; anchor interactions to source — see "Make popovers origin-aware" in [`SKILL.md`](SKILL.md) for origin mechanic. Mirror easing on reversible transitions so outbound path match return (inverse cubic-bézier control points two directions).
 
 ## Hint in the direction of the gesture
 
@@ -94,7 +94,7 @@ function rubberband(overshoot, dimension, constant = 0.55) {
 
 - **Tap:** highlight on touch-_down_ (instant), commit on touch-_up_. Add ~10px hysteresis/hit padding around target, allow cancel-by-dragging-away and back.
 - **Drag/swipe:** require small movement threshold (hysteresis, ~10px) before committing to direction, then track 1:1.
-- **Detect all plausible gestures parallel from first move**, then confidently cancel losers once intent clear. Avoid recognizers reporting only _final_ state (`swipeleft`-type events) — throw away continuous tracking needed for feedback.
+- **Detect all plausible gestures parallel from first move**, then confidently cancel losers once intent clear. Pick recognizers that stream continuous position whole gesture — feedback need position every frame, not one verdict at end.
 - **Minimize disambiguation delays.** Double-tap detection unavoidably delay single taps; only pay cost where double-tap truly exist.
 
 ## Frame-level smoothness
@@ -107,7 +107,7 @@ Glass/blur surface arriving: animate blur radius and scale together on enter/exi
 
 ## Reduced motion & accessibility
 
-`prefers-reduced-motion` bar lives in `motion-craft`; two further signals bake into components. `prefers-reduced-transparency: reduce` make translucent surfaces frostier/solid (raise background opacity, drop blur). `prefers-contrast: more` want near-solid backgrounds with defined contrasting border.
+`prefers-reduced-motion` bar lives in "Accessibility" in [`SKILL.md`](SKILL.md); two further signals bake into components. `prefers-reduced-transparency: reduce` make translucent surfaces frostier/solid (raise background opacity, drop blur) — support Chrome 118+ / Firefox 113+, absent in Safari, the engine whose users most flip the OS Reduce Transparency setting, so treat as enhancement and keep translucent surface legible unaided. `prefers-contrast: more` want near-solid backgrounds with defined contrasting border.
 
 Vestibular: avoid full-viewport moving backgrounds, slow looping oscillations near 0.2 Hz (one cycle per 5s), abrupt brightness jumps (ease dark↔light theme changes). Make large moving objects semi-transparent while traveling, fade big surfaces out during large reposition, back in once settled.
 
