@@ -95,6 +95,8 @@ Animate `transform` and `opacity` only — skip layout/paint, run on GPU. Animat
 
 `transition: all` always a finding — animate unintended properties off GPU. Name exact properties: `transition: transform 200ms ease-out`.
 
+`box-shadow` repaints every frame. Put shadow on pseudo-element, transition that element's `opacity` instead. `will-change` hint one property that actually animates — three or more hold memory and can run slower than no hint at all.
+
 Don't drive child transforms via CSS variable on parent — changing variable on parent recalc styles for all children, so in drawer w/ many items, updating `--swipe-amount` on container cause expensive recalc. Set `transform` direct on element instead.
 
 ```js
@@ -109,7 +111,7 @@ element.style.transform = `translateY(${distance}px)`; // good: only this elemen
 <motion.div animate={{ transform: "translateX(100px)" }} />  // hardware accelerated — stays smooth
 ```
 
-CSS animations beat JS under load, run off main thread; rAF-based animations stutter while browser load/script/paint. Use CSS (or WAAPI) for predetermined motion, JS/springs for dynamic/gesture-driven motion. WAAPI give JS control w/ CSS performance — hardware-accelerated, interruptible, no library:
+CSS animations beat JS under load, run off main thread; rAF-based animations stutter while browser load/script/paint. WAAPI give JS control w/ CSS performance — hardware-accelerated, interruptible, no library:
 
 ```js
 element.animate([{ clipPath: 'inset(0 0 100% 0)' }, { clipPath: 'inset(0 0 0 0)' }], {
@@ -160,4 +162,4 @@ element.animate([{ clipPath: 'inset(0 0 100% 0)' }, { clipPath: 'inset(0 0 0 0)'
 
 Play animations at reduced speed spot issues invisible at full speed — temp raise duration to 2–5×, or use browser DevTools animation inspector to slow playback. In slow motion, look for: colors transitioning smooth vs two distinct states overlapping; easing that start/stop abrupt; wrong `transform-origin` (element scale from wrong point); multiple animated properties (opacity, transform, color) drifting out sync. Step frame-by-frame in Chrome DevTools Animations panel catch timing drift between coordinated properties. Test touch interactions (drawers, swipe) on physical devices — connect phone, hit dev server by IP, use Safari remote devtools (Xcode Simulator fallback; real hardware better for gestures).
 
-**Review your work next day.** Notice imperfections next day missed during dev, slow-motion/frame-by-frame review surface timing issues invisible at full speed.
+**Review your work next day.** Fresh eyes catch what dev-day eyes miss.

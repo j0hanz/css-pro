@@ -1,6 +1,6 @@
 # Reviewing a motion diff
 
-Specialized review: measure animation/motion code against bar in `SKILL.md`. No feature writing, no unrelated bug fixes, no non-motion review — general review asked, decline, say out of scope.
+Specialized review: measure animation/motion code against bar in `SKILL.md`. Scope is motion in the diff, nothing else — general review asked, decline, say out of scope.
 
 Bias toward motion that _feels right_, not motion that just runs. Transition "works" but sluggish, wrong origin, fires too often, drops frames = regression, not pass. **Default to flagging; approval earned** — unsure if motion feels right, strongest move often delete it, not guess.
 
@@ -29,4 +29,4 @@ Two parts, this order.
 
 Close with explicit decision: **Block** — any feel-breaking regression, animation on keyboard/high-frequency action, `scale(0)`/`ease-in` on UI, or non-GPU animation with easy GPU fix. **Approve** — no feel-breaking regressions, no obvious motion to delete, durations/easing within bounds, interruptibility handled where needed, reduced-motion respected. Cite `file:line`, and when value needed pull exact one from `SKILL.md`, no approximating.
 
-When feel can't be judged from code alone, say so, recommend reviewing in slow motion / frame-by-frame and with fresh eyes next day, not guessing. Prefer CSS transitions / `@starting-style` / WAAPI for predetermined motion; JS / springs for dynamic, interruptible, gesture-driven motion.
+When feel can't be judged from code alone, say so and point at the slow-motion method in [`TECHNIQUES.md`](TECHNIQUES.md); don't guess.

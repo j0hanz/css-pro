@@ -1,6 +1,6 @@
 # Shorthand
 
-**Shorthands** set many properties one declaration — `margin: 10px 5px`, `border: 1px solid black`. Compress longhand sprawl one line. File cover: reset trap, value-count rules, per-property order high-traffic shorthands. Value naming: see [`TOKENS.md`](TOKENS.md). Process: see [`SKILL.md`](SKILL.md).
+**Shorthands** set many properties one declaration — `margin: 10px 5px`, `border: 1px solid black`. Compress longhand sprawl one line. File cover: reset trap, value-count rules, per-property order high-traffic shorthands. Value naming: see [`PROPERTIES.md`](PROPERTIES.md). Process: see [`SKILL.md`](SKILL.md).
 
 ## The reset trap (read this first)
 

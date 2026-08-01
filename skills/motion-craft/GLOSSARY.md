@@ -1,6 +1,6 @@
 # Motion Glossary — reverse-lookup
 
-Reverse-lookup table: vague description ("bouncy thing when popover opens") → term. Descriptions quoted as-is, authoritative. Trivial defs (Translate, Scale, Rotate, Fade, Hover, Drag, Delay, Duration, Loop, Blur) skipped — only non-obvious mappings, confusable-term disambiguation here.
+Reverse-lookup table: vague description ("bouncy thing when popover opens") → term. Holds non-obvious mappings and confusable-term disambiguation only. When to reach for an easing or a spring, see [`SKILL.md`](SKILL.md); this file names things, doesn't prescribe.
 
 ## Entrances & Exits
 
@@ -53,10 +53,10 @@ Reverse-lookup table: vague description ("bouncy thing when popover opens") → 
 
 ## Easing — pure definitions
 
-- **Ease-out** — Fast start, slow end. Default for most UI, anything responding to user.
+- **Ease-out** — Fast start, slow end.
 - **Ease-in** — Slow start, fast end.
-- **Ease-in-out** — Slow, fast, slow. For elements already on screen moving A to B.
-- **Linear** — Constant speed. Reserve for spinners or marquees.
+- **Ease-in-out** — Slow, fast, slow.
+- **Linear** — Constant speed.
 - **Cubic-bezier** — Custom easing curve, define for precise control.
 - **Asymmetric easing** — Curve accelerating/decelerating at different rates. Feels more alive than symmetric.
 

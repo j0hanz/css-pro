@@ -1,11 +1,11 @@
 ---
 name: motion-craft
-description: Use when building or deciding web animation — CSS transitions, transform animations, @keyframes, springs, hover and entrance effects, popovers/drawers, scroll-driven motion — or reviewing animation/motion code in a diff. Covers easing, duration, origin, the physics of motion feel, and the vocabulary for naming an effect.
+description: Use when building or deciding web animation — CSS transitions, springs, entrance and hover effects, popovers and drawers, scroll reveals — when reviewing animation or motion code in a diff, or when naming an effect from a vague description.
 ---
 
 # Motion Craft
 
-Prescriptive half of motion: what good motion _is_, how to _decide_ it, how to _review_ it. Descriptive knowledge — effect names in [`GLOSSARY.md`](GLOSSARY.md), how motion physically feels in [`PHYSICS.md`](PHYSICS.md) — sits alongside; cite for formulas/names, don't duplicate.
+Prescriptive half of motion: what good motion _is_, how to _decide_ it, how to _review_ it. Effect names in [`GLOSSARY.md`](GLOSSARY.md), physics of feel in [`PHYSICS.md`](PHYSICS.md) — cite those for names and formulas.
 
 ## The decision engine
 
@@ -46,8 +46,6 @@ Never use `ease-in` for UI. Starts slow, delays exact moment user watches most c
 
 Speed also perceived, not just actual: instant tooltips after first one open (skip delay + skip animation) make whole toolbar feel faster.
 
-Done = all four questions answered, easing token + duration chosen, origin + interruptibility decided, reduced-motion handled.
-
 ## Springs
 
 Springs feel natural — simulate physics, no fixed duration; settle on own params. Use for drag interactions with momentum, elements that should feel "alive" (Apple's Dynamic Island), gestures interruptible mid-animation, decorative mouse-tracking. (Physics of springs in gesture-driven motion — velocity handoff, momentum projection, rubber-banding, decomposing 2D motion into X and Y — see [`PHYSICS.md`](PHYSICS.md); here's config.)
@@ -60,13 +58,13 @@ Springs feel natural — simulate physics, no fixed duration; settle on own para
 { type: "spring", mass: 1, stiffness: 100, damping: 10 }
 ```
 
-Keep bounce subtle (0.1–0.3) when used. Avoid bounce in most UI — reserve for drag-to-dismiss and playful interactions. Interruptibility = reason to pick springs over CSS keyframes: springs keep velocity when interrupted (keyframes restart from zero), so spring animation smoothly reverses from current position when you click expanded item then immediately press Escape.
+Keep bounce subtle (0.1–0.3) when used. Avoid bounce in most UI — reserve for drag-to-dismiss and playful interactions. Velocity is what you buy: spring reverse smoothly from current position when you click expanded item then immediately press Escape.
 
 For decorative mouse interactions, tie visual changes to spring (`useSpring` in Motion/Framer Motion) instead of directly to mouse position — direct mapping feels artificial, lacks motion; spring interpolates with momentum. Only when motion decorative; for functional graph in banking app, no animation better.
 
 ## Component building
 
-**Buttons must feel responsive.** Add `transform: scale(0.97)` on `:active` — instant feedback UI is listening. Scale subtle (0.95–0.98), applies to any pressable element; `scale()` scales children too (font, icons, content) — feature for press feedback. When crossfade between two states still feels off, subtle `filter: blur(2px)` masks it — keep under 20px, see "Use blur to mask imperfect transitions" in [`TECHNIQUES.md`](TECHNIQUES.md) for why. Applied inline to press feedback here:
+**Buttons must feel responsive.** Add `transform: scale(0.97)` on `:active` — instant feedback UI is listening. Scale subtle (0.95–0.98), applies to any pressable element; `scale()` scales children too (font, icons, content) — feature for press feedback. When crossfade between two states still feels off, subtle `filter: blur(2px)` masks it — see "Use blur to mask imperfect transitions" in [`TECHNIQUES.md`](TECHNIQUES.md) for why and for the cost ceiling. Applied inline to press feedback here:
 
 ```css
 .button {
@@ -96,13 +94,13 @@ For decorative mouse interactions, tie visual changes to spring (`useSpring` in 
 } /* Base UI */
 ```
 
-**Prefer CSS transitions over keyframes for interruptible UI** (transitions retarget mid-animation). For rapidly triggered state, transitions stay smooth.
+**Pick the driver by what starts the motion.** Discrete state change (open/close, hover, mount) → CSS transition: retargets mid-flight, so rapidly toggled state stays smooth. Continuous gesture (drag, swipe, flick) → spring: animates from the current on-screen value and carries velocity, which a transition cannot. `@keyframes` only where nothing interrupts — they restart from zero.
 
 For tooltip skip-delay-on-subsequent-hovers, `@starting-style` entry animation, clip-path patterns (reveal-on-scroll, hold-to-delete, tab color transitions, comparison sliders), 3D transforms, and full clip-path/inset reference, open [`TECHNIQUES.md`](TECHNIQUES.md).
 
 ## Accessibility
 
-`prefers-reduced-motion` means fewer and gentler animations, **not zero** — keep opacity and color transitions that aid comprehension, remove movement and position changes. Gate hover animations behind `@media (hover: hover) and (pointer: fine)` — touch devices trigger hover on tap, cause false positives. (Full three-signal reduced-motion model — `prefers-reduced-transparency`, `prefers-contrast`, vestibular specifics — see [`PHYSICS.md`](PHYSICS.md).)
+`prefers-reduced-motion` means fewer and gentler animations, **not zero** — keep opacity and color transitions that aid comprehension, remove movement and position changes. Gate hover animations behind `@media (hover: hover) and (pointer: fine)` — touch devices trigger hover on tap, cause false positives. (`prefers-reduced-transparency`, `prefers-contrast`, and vestibular specifics — see [`PHYSICS.md`](PHYSICS.md).)
 
 ```css
 @media (prefers-reduced-motion: reduce) {
@@ -121,6 +119,8 @@ For tooltip skip-delay-on-subsequent-hovers, `@starting-style` entry animation, 
 const shouldReduceMotion = useReducedMotion();
 const closedX = shouldReduceMotion ? 0 : '-100%';
 ```
+
+Done = all four decision-engine questions answered, easing token + duration chosen, origin + driver (transition / spring) decided, reduced-motion and hover gating handled.
 
 ## Reviewing a motion diff
 
