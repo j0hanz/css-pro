@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { text } from 'node:stream/consumers';
+import { CUSTOM_PROPERTY_DECLARED } from './rules.mjs';
 
 const EXTS = ['css', 'scss', 'sass', 'less', 'vue', 'svelte', 'astro', 'html', 'htm'];
 const STYLE_OR_MARKUP = new RegExp(`\\.(?:${EXTS.join('|')})$`, 'i');
@@ -21,6 +22,25 @@ function hasStyles(cwd) {
     { encoding: 'utf8', windowsHide: true },
   );
   return r.status === 0 && r.stdout.trim().length > 0;
+}
+
+function tokenSheets(cwd) {
+  const r = spawnSync(
+    'git',
+    ['-C', cwd, 'grep', '-cIE', '-e', CUSTOM_PROPERTY_DECLARED, '--', ...STYLE_GLOBS],
+    { encoding: 'utf8', windowsHide: true },
+  );
+  if (r.status !== 0) return [];
+  return r.stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => {
+      const at = l.lastIndexOf(':');
+      return { path: l.slice(0, at), n: +l.slice(at + 1) };
+    })
+    .sort((a, b) => b.n - a.n || a.path.localeCompare(b.path))
+    .slice(0, 3)
+    .map((f) => f.path);
 }
 
 if (process.argv[2] === '--self-test') {
@@ -52,11 +72,16 @@ try {
   const payload = JSON.parse((await text(process.stdin)) || '{}');
   const cwd = payload.cwd || process.cwd();
   if (!hasStyles(cwd)) process.exit(0);
+  const sheets = tokenSheets(cwd);
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: {
         hookEventName: payload.hook_event_name || 'SessionStart',
-        additionalContext: BRIEF,
+        additionalContext:
+          BRIEF +
+          (sheets.length
+            ? ` Custom properties here are declared mostly in ${sheets.join(', ')}; a var() name absent from the repo resolves to nothing.`
+            : ''),
       },
     }),
   );

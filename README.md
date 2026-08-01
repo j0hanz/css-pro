@@ -25,6 +25,18 @@ carries it, reads as clean in the added lines alone. So at turn end the same eig
 run over the files `git` reports as changed, reporting only what lands on a changed line;
 nothing pre-existing is dragged in, and a finding is reported once, not once per turn.
 
+**It resolves your tokens against the whole repository.** Every other check reads one
+file, so none of them can tell a real token from a typo — `var(--colour-brand)` looks the
+same as `var(--color-brand)` in the sheet that uses it. At turn end the names read by a
+`var()` with no fallback on a changed line are matched against every custom property
+declared anywhere in the repo, including ones set from JavaScript; what nothing declares
+is named. A `var()` that carries a fallback renders correctly either way and stays
+silent. The session-start reminder also names the sheets your tokens actually live in.
+
+**The subagent hears its own defects.** The turn-end sweep also runs when a subagent
+finishes, so CSS it wrote through a shell comes back while it can still fix it, rather
+than surfacing to its parent after it is gone.
+
 **The hook makes no style decisions for you.** No house palette, no naming convention, no
 token taxonomy, no opinion on what looks templated. A check that ships taste makes every
 project that installs it look the same, and takes decisions away from the person who has

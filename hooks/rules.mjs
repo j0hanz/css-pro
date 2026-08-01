@@ -1,6 +1,8 @@
 export const STYLE_MARKERS =
   /(?:styled|css|keyframes|createGlobalStyle)\s*[.(`]|(?:style|css|sx)\s*=\s*\{\{|createStyles\s*\(|\bstyle\s*\(\s*\{|<style[\s>]|\bstyle\s*=\s*["']/;
 
+export const CUSTOM_PROPERTY_DECLARED = String.raw`(--[A-Za-z0-9_-]+["']?[ \t]*:)|(@property[ \t]+--[A-Za-z0-9_-]+)|(setProperty\([ \t]*["']--[A-Za-z0-9_-]+)`;
+
 export const DECLARATION =
   /^[ \t]*(?:--[\w-]+|[a-z]+(?:-[a-z]+)+|transition)[ \t]*:[ \t]*\S|:[ \t]*[^;{}\n]*(?:\d(?:px|r?em|%|vh|vw|dvh|vmin|vmax|ms|s|deg|fr|ch|pt)(?![\w-])|var\(|calc\(|clamp\()/im;
 

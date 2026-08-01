@@ -5,34 +5,12 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { fileURLToPath } from 'node:url';
+import { AUDITABLE, DIFF_ARGS, ranges } from './changed.mjs';
 
-const AUDITABLE = /\.(css|scss|sass|less|[cm]?[jt]sx?|vue|svelte|astro|html?)$/i;
 const MAX_FILES = 40;
 const MAX_FINDINGS = 5;
-const HUNK = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
 const AUDIT = fileURLToPath(new URL('../skills/css-audit/audit.mjs', import.meta.url));
-
-function ranges(diff) {
-  const out = new Map();
-  let file = null;
-  let prev = '';
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+++ ') && prev.startsWith('--- ')) {
-      const p = line.slice(4).trim();
-      file = p === '/dev/null' ? null : p.replace(/^b\//, '');
-    } else if (file && line.startsWith('@@')) {
-      const m = HUNK.exec(line);
-      const count = m ? (m[2] === undefined ? 1 : +m[2]) : 0;
-      if (count > 0) {
-        if (!out.has(file)) out.set(file, []);
-        out.get(file).push([+m[1], +m[1] + count - 1]);
-      }
-    }
-    prev = line;
-  }
-  return out;
-}
 
 if (process.argv[2] === '--self-test') {
   const got = ranges(
@@ -82,8 +60,7 @@ try {
   const root = git('rev-parse', '--show-toplevel')?.trim();
   if (!root) process.exit(0);
 
-  const diffArgs = ['diff', '-U0', '--no-color', '--no-ext-diff'];
-  const changed = ranges(git(...diffArgs, 'HEAD') ?? git(...diffArgs) ?? '');
+  const changed = ranges(git(...DIFF_ARGS, 'HEAD') ?? git(...DIFF_ARGS) ?? '');
   for (const p of (git('ls-files', '-o', '--exclude-standard', '--full-name', '--', ':/') ?? '')
     .split('\n')
     .filter(Boolean))
@@ -129,7 +106,8 @@ try {
 
   const stamp = join(
     tmpdir(),
-    `css-pro-sweep-${String(payload.session_id ?? 'main').replace(/[^\w-]/g, '_')}.txt`,
+    `css-pro-sweep-${String(payload.session_id ?? 'main').replace(/[^\w-]/g, '_')}` +
+      `${payload.agent_id ? `-${String(payload.agent_id).replace(/[^\w-]/g, '_')}` : ''}.txt`,
   );
   let last = '';
   try {
@@ -143,7 +121,8 @@ try {
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: {
-        hookEventName: 'Stop',
+        // SubagentStop runs the same sweep; naming the wrong event drops the output.
+        hookEventName: payload.hook_event_name || 'Stop',
         additionalContext:
           'css-pro swept the CSS that changed in this turn. These are rules the per-edit ' +
           'check refuses a write for; it did not see these, because they reached disk ' +
