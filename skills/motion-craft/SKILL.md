@@ -1,11 +1,11 @@
 ---
 name: motion-craft
-description: Web animation — use when deciding whether and how to animate (duration, easing curve, spring vs transition, prefers-reduced-motion), when building an entrance, hover, popover, drawer, or scroll reveal, when reviewing animation in a diff, or when naming an effect from a vague description. Not for transition/animation shorthand syntax or custom-property mechanics — css-craft.
+description: Web animation — use when deciding whether and how to animate (duration, easing curve, spring vs transition, prefers-reduced-motion), when building an entrance, hover, popover, drawer, or scroll reveal, or when naming an effect from a vague description. Not for transition/animation shorthand syntax or custom-property mechanics — css-craft; not review — css-audit.
 ---
 
 # Motion Craft
 
-Prescriptive half of motion: what good motion _is_, how to _decide_ it, how to _review_ it.
+Prescriptive half of motion: what good motion _is_, how to _decide_ it, how to _build_ it.
 
 Holding a description but not the name — "bouncy thing when the popover opens", "the fill that runs while you hold the button" — open [`GLOSSARY.md`](GLOSSARY.md): reverse lookup, description in, term out, plus the vs-notes separating the pairs that get confused (clip-path vs mask, shared element vs layout animation, asymmetric easing vs asymmetric timing).
 
@@ -145,7 +145,3 @@ Every line true before animation ships. Conditional lines pass untouched when co
 - _Press-and-release or hold:_ enter and exit timings differ (slow in, snappy out).
 - _Hover motion:_ gated behind `@media (hover: hover) and (pointer: fine)`.
 - _Loop running past 5s:_ pause/stop control shipped with it.
-
-## Reviewing a motion diff
-
-Reviewing animation/motion code in diff, open [`REVIEW.md`](REVIEW.md) — holds the canonical "Flag these on sight" list and the output format: Before/After/Why findings table, then commentary grouped by impact, closing on a Block/Approve verdict.

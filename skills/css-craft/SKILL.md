@@ -1,6 +1,6 @@
 ---
 name: css-craft
-description: CSS mechanics — use when a declaration silently does nothing (var() not resolving, shorthand wiping the longhands it omits, an unregistered custom property refusing to interpolate), when writing custom properties, shorthand, intrinsic layout, or value functions like calc-size()/color-mix(), or when reviewing a CSS diff. Not motion — duration, easing, and whether to animate are motion-craft.
+description: CSS mechanics — use when a declaration silently does nothing (var() not resolving, shorthand wiping the longhands it omits, an unregistered custom property refusing to interpolate), when writing custom properties, shorthand, intrinsic layout, or value functions like calc-size()/color-mix(). Not motion — duration, easing, and whether to animate are motion-craft; not review — css-audit.
 ---
 
 # CSS Craft

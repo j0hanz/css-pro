@@ -45,15 +45,16 @@ The checks run automatically. There is nothing to invoke.
 
 ## Skills
 
-Two, both loaded by Claude when relevant. css-craft is reference: how CSS behaves, no
+Three, loaded by Claude when relevant. css-craft is reference: how CSS behaves, no
 opinion on what you write. motion-craft is prescriptive — it names durations, easing and
-scale values, and reviews animation against them. Neither blocks a write; that is the
-hook.
+scale values. css-audit re-reads existing code the hook let through: a whole-file audit
+and a CSS or motion diff review. None blocks a write; that is the hook.
 
-| Skill                                        | What it covers                                                                                                |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| [css-craft](skills/css-craft/SKILL.md)       | custom properties and `var()`, shorthand and the reset trap, intrinsic layout, CSS value functions            |
-| [motion-craft](skills/motion-craft/SKILL.md) | whether and how to animate; easing, duration, origin; reviewing animation in a diff; effect names and physics |
+| Skill                                        | What it covers                                                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [css-craft](skills/css-craft/SKILL.md)       | custom properties and `var()`, shorthand and the reset trap, intrinsic layout, CSS value functions           |
+| [motion-craft](skills/motion-craft/SKILL.md) | whether and how to animate; easing, duration, origin; effect names and physics                               |
+| [css-audit](skills/css-audit/SKILL.md)       | whole-file audit of a stylesheet; reviewing a CSS or motion diff — defects the per-edit hook never re-checks |
 
 ## License
 

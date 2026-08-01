@@ -1,8 +1,10 @@
 # AGENTS
 
 Claude Code plugin that checks CSS as it is written and refuses writes carrying provable
-defects. Two parts: a PreToolUse/PostToolUse hook (`hooks/`) and two reference skills
-(`skills/`). No build step, no runtime dependencies.
+defects. Two parts: a PreToolUse/PostToolUse hook (`hooks/`) and three skills (`skills/`):
+css-craft (CSS mechanics), motion-craft (motion decisions), css-audit (a whole-file audit
+script, `skills/css-audit/audit.mjs`, plus a diff review). No build step, no runtime
+dependencies.
 
 ## Rules
 
