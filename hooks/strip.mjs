@@ -2,11 +2,17 @@ const blank = (s) => s.replace(/[^\n]/g, ' ');
 
 const LINE_COMMENT_LANGS = /\.(scss|sass|less|[cm]?[jt]sx?)$/i;
 const MARKUP_LANGS = /\.(html?|astro|vue|svelte)$/i;
+const HOST_CODE = /\.[cm]?[jt]sx?$/i;
 const STYLE_LANG = /\blang\s*=\s*["']?(?:scss|sass|less)/i;
+const MARKUP_ANCHOR = /<\/?(?:style|script)\b|\bstyle\s*=\s*["']|^---\r?$/im;
 
 export function prepare(text, filePath = '', sink) {
-  if (MARKUP_LANGS.test(filePath)) return prepareMarkup(text, sink);
-  return prepareCode(stripComments(text, LINE_COMMENT_LANGS.test(filePath)), sink);
+  if (MARKUP_LANGS.test(filePath) && MARKUP_ANCHOR.test(text)) return prepareMarkup(text, sink);
+  return prepareCode(
+    stripComments(text, LINE_COMMENT_LANGS.test(filePath)),
+    HOST_CODE.test(filePath),
+    sink,
+  );
 }
 
 function appendBlocks(head, blocks, sink) {
@@ -29,18 +35,18 @@ function prepareMarkup(text, sink) {
   if (frontmatter) {
     const code = stripComments(frontmatter[1], true);
     const start = contentStart(frontmatter, code, '---'.length);
-    regions.push({ start, code: blankStrings(code) });
+    regions.push({ start, code: blankStrings(keepTemplates(code)) });
     for (const b of styleObjectBlocks(code)) extra.push({ text: b.text, source: start + b.at });
   }
-  for (const m of src.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style/gi))
+  for (const m of src.matchAll(/<style\b([^>]*)>([\s\S]*?)(?=<\/style|$)/gi))
     regions.push({
-      start: contentStart(m, m[2], '</style'.length),
+      start: contentStart(m, m[2], 0),
       code: blankStrings(stripComments(m[2], STYLE_LANG.test(m[1]))),
     });
   for (const m of src.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script/gi)) {
     const code = stripComments(m[1], true);
     const start = contentStart(m, m[1], '</script'.length);
-    regions.push({ start, code: blankStrings(code) });
+    regions.push({ start, code: blankStrings(keepTemplates(code)) });
     for (const b of styleObjectBlocks(code)) extra.push({ text: b.text, source: start + b.at });
   }
   for (const m of src.matchAll(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
@@ -60,9 +66,52 @@ function prepareMarkup(text, sink) {
   return appendBlocks(out, extra, sink);
 }
 
-function prepareCode(code, sink) {
+function prepareCode(code, hostCode, sink) {
   const blocks = styleObjectBlocks(code).map((b) => ({ text: b.text, source: b.at }));
-  return appendBlocks(blankStrings(code), blocks, sink);
+  return appendBlocks(blankStrings(hostCode ? keepTemplates(code) : code), blocks, sink);
+}
+
+function keepTemplates(code) {
+  let out = '';
+  let i = 0;
+  while (i < code.length) {
+    if (code[i] !== '`') {
+      out += blank(code[i]);
+      i++;
+      continue;
+    }
+    const end = skipString(code, i);
+    out += ' ';
+    let k = i + 1;
+    while (k < end) {
+      if (code[k] === '$' && code[k + 1] === '{') {
+        const stop = Math.min(closingBrace(code, k + 2), end);
+        out += blank(code.slice(k, stop));
+        k = stop;
+        continue;
+      }
+      out += code[k] === '`' ? ' ' : code[k];
+      k++;
+    }
+    i = end;
+  }
+  return out;
+}
+
+function closingBrace(text, from) {
+  let depth = 1;
+  let k = from;
+  while (k < text.length) {
+    const ch = text[k];
+    if (ch === '"' || ch === "'" || ch === '`') {
+      k = skipString(text, k);
+      continue;
+    }
+    if (ch === '{') depth++;
+    else if (ch === '}' && --depth === 0) return k + 1;
+    k++;
+  }
+  return text.length;
 }
 
 function stripComments(text, lineComments) {
@@ -79,27 +128,17 @@ function stripComments(text, lineComments) {
       continue;
     }
     if (c === '#' && next === '{') {
-      let depth = 1;
-      let k = i + 2;
-      while (k < text.length) {
-        const ch = text[k];
-        if (ch === '"' || ch === "'") {
-          k = skipString(text, k);
-          continue;
-        }
-        if (ch === '{') depth++;
-        else if (ch === '}') {
-          depth--;
-          if (depth === 0) {
-            k++;
-            break;
-          }
-        }
-        k++;
-      }
-      const stop = depth === 0 ? k : text.length;
+      const stop = closingBrace(text, i + 2);
       out += blank(text.slice(i, stop));
       i = stop;
+      continue;
+    }
+    if (c === '`') {
+      const j = skipString(text, i);
+      const closed = j > i + 1 && text[j - 1] === '`';
+      out +=
+        '`' + stripComments(text.slice(i + 1, closed ? j - 1 : j), false) + (closed ? '`' : '');
+      i = j;
       continue;
     }
     if (lineComments && c === '/' && next === '/') {

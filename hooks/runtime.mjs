@@ -23,7 +23,7 @@ function run(rules, added, readFile, path) {
   for (const rule of rules) {
     if (rule.files && !rule.files.test(path)) continue;
     if (rule.fn) {
-      if (rule.fn(added)) hits.push(rule.msg);
+      if (rule.fn(added, readFile)) hits.push(rule.msg);
       continue;
     }
     if (rule.re) {
@@ -65,7 +65,7 @@ try {
   };
 
   if (MODE === 'pre') {
-    const blocks = run(BLOCK, added, readFile, path);
+    const blocks = run(BLOCK, added, () => null, path);
     if (blocks.length) {
       process.stdout.write(
         JSON.stringify({
@@ -99,5 +99,6 @@ try {
     }
   }
 } catch (e) {
-  console.error(`css-pro: check skipped (${e.message.split('\n')[0]})`);
+  const why = String(e?.message ?? e).split('\n')[0];
+  process.stdout.write(JSON.stringify({ systemMessage: `css-pro: check skipped (${why})` }));
 }

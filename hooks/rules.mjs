@@ -187,19 +187,21 @@ function directionBlindRadius(added) {
   return found(at.sort((a, b) => a - b));
 }
 
-function focusableMissingFocusVisible(added) {
+function focusableMissingFocusVisible(added, readFile) {
   if (!/:focus-visible/i.test(added)) return null;
+  const scope = readFile?.() ?? added;
   const focused = new Set();
-  const cursorBlocks = [];
-  for (const m of eachBlock(added)) {
+  for (const m of eachBlock(scope))
     if (m[1].includes(':focus-visible'))
       for (const part of m[1].split(',')) focused.add(baseOfSelector(part));
-    if (/(?<![\w-])cursor\s*:\s*pointer/i.test(m[2])) cursorBlocks.push(m);
-  }
   if (focused.has('*')) return null;
   const at = [];
-  for (const m of cursorBlocks)
-    if (!m[1].split(',').some((part) => focused.has(baseOfSelector(part)))) at.push(bodyStartOf(m));
+  for (const m of eachBlock(added))
+    if (
+      /(?<![\w-])cursor\s*:\s*pointer/i.test(m[2]) &&
+      !m[1].split(',').some((part) => focused.has(baseOfSelector(part)))
+    )
+      at.push(bodyStartOf(m));
   return found(at.sort((a, b) => a - b));
 }
 

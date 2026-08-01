@@ -19,6 +19,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/runtime.mjs\" post",
+            "async": true,
             "timeout": 10
           }
         ]
