@@ -10,6 +10,8 @@ const blank = (s) => s.replace(/[^\n]/g, ' ');
 // appear inside an unquoted url(). Only strip it where it means what we think.
 const LINE_COMMENT_LANGS = /\.(scss|sass|less|[cm]?[jt]sx?)$/i;
 const MARKUP_LANGS = /\.(html?|astro|vue|svelte)$/i;
+// `<style lang="scss">` is SCSS, not CSS: `//` opens a comment there too.
+const STYLE_LANG = /\blang\s*=\s*["']?(?:scss|sass|less)/i;
 
 export function prepare(text, filePath = '') {
   if (MARKUP_LANGS.test(filePath)) return prepareMarkup(text);
@@ -22,8 +24,8 @@ export function prepare(text, filePath = '') {
 function prepareMarkup(text) {
   const src = text.replace(/<!--[\s\S]*?-->/g, blank);
   const parts = [];
-  for (const m of src.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style/gi))
-    parts.push(stripComments(m[1], false));
+  for (const m of src.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style/gi))
+    parts.push(blankStrings(stripComments(m[2], STYLE_LANG.test(m[1]))));
   for (const m of src.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script/gi))
     parts.push(prepareCode(stripComments(m[1], true)));
   const frontmatter = src.match(/^---\r?\n([\s\S]*?)^---/m);
