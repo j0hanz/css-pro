@@ -17,7 +17,11 @@
 // preserves line numbers and selectors there; host files are left to the per-edit
 // hook.
 
-import { readFileSync, globSync } from 'node:fs';
+// Namespace import, not `{ readFileSync, globSync }`: a named import of an export the
+// host Node does not have is a SyntaxError at load, so on Node 20 the script would die
+// before the "needs Node 22" guard in main() could print. A namespace member is just
+// `undefined` there, and the guard runs.
+import * as fs from 'node:fs';
 import { prepare } from '../../hooks/strip.mjs';
 import { BLOCK, ADVISE } from '../../hooks/rules.mjs';
 
@@ -293,7 +297,7 @@ function customPropertyFindings(files) {
 function auditFile(path) {
   let raw;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = fs.readFileSync(path, 'utf8');
   } catch (e) {
     return { path, error: `unreadable: ${e.code || e.message}` };
   }
@@ -571,14 +575,14 @@ function main(args) {
   // gate that audits nothing must fail, not pass.
   // fs.globSync arrived in Node 22. Fail with instructions rather than a
   // TypeError — or worse, a silent skip — when the host Node is older.
-  if (args.some((a) => /[*?[\]{}]/.test(a)) && typeof globSync !== 'function') {
+  if (args.some((a) => /[*?[\]{}]/.test(a)) && typeof fs.globSync !== 'function') {
     console.log('Glob arguments need Node 22 or newer; pass explicit file paths instead.');
     return 1;
   }
   let failed = 0;
   args = args.flatMap((a) => {
     if (!/[*?[\]{}]/.test(a)) return a;
-    const hits = globSync(a);
+    const hits = fs.globSync(a);
     if (hits.length === 0) {
       console.log(`== ${a} ==\n  (skipped: glob matched nothing)`);
       failed++;
