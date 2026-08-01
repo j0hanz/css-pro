@@ -1,11 +1,31 @@
 #!/usr/bin/env node
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { prepare } from '../../hooks/strip.mjs';
 import { BLOCK, ADVISE } from '../../hooks/rules.mjs';
 
 const STYLESHEET = /\.(css|scss|sass|less)$/i;
 const GLOB = /[*?[\]{}]/;
 const SASS_INDENTED = /\.sass$/i;
+
+const USAGE = `css-pro audit — whole-file CSS/SCSS/Sass/Less audit.
+
+usage:
+  node audit.mjs <file|dir|glob>... [--strict] [--json]
+  node audit.mjs --list-rules
+  node audit.mjs --help | --self-test
+
+  --strict      gate ADVISE and WHOLE-FILE findings too (exit 1); BLOCK always gates
+  --json        emit one flat JSON array: [{path,line,severity,msg}]
+  --list-rules  print the rule table, then exit
+  --help, -h    this message
+  --self-test   run the built-in self-test (also runs with no arguments)
+  <dir>         recurse for .css/.scss/.sass/.less (no Node 22 needed; globs do)
+
+Suppress a false positive: put /* csspro-ignore */ on the line above the finding
+(or on the same line); it covers that line and the next.
+
+Exit code: 0 clean, 1 if any gated finding remains or a file/glob failed.`;
 
 function makeLineLookup(text) {
   const starts = [0];
@@ -127,6 +147,12 @@ const MIN_SHARED_DECLS = 4;
 // for agreeing on boilerplate — an 18-declaration rule sharing four `font-*` lines with
 // another is not a copy of it, and scoring on count reported two dozen such pairs.
 const MIN_OVERLAP_RATIO = 0.6;
+// Full containment: a block that re-asserts the ENTIRETY of an earlier block
+// (shared === the earlier block's count) is a wholesale copy, not boilerplate
+// agreement. Higher floor than MIN_SHARED_DECLS — a 4-decl block fully inside a
+// longer one is usually a shared reset (color/border/outline/z-index), not a
+// copied component; five is a named component being redeclared whole.
+const MIN_FULL_REDECL = 5;
 
 // The earlier rule this one most resembles, under the same conditions, scored as shared
 // over union. Ties go to the earliest line so the report is stable across runs.
@@ -189,6 +215,17 @@ function structureFindings(prepared, lineOf) {
       out.push({
         line: r.line,
         msg: `repeated declarations — \`${norm(r.selector)}\` sets the same ${decls.length} declarations as \`${norm(near.rule.selector)}\` at line ${near.rule.line}, under the same conditions. One selector list, or a shared class.`,
+      });
+    // A block that re-asserts the WHOLE of an earlier block (shared === the
+    // earlier count) then adds its own: a copied-then-extended component. The
+    // ratio gate misses it — a 12-decl block sharing 7 with a 7-decl block scores
+    // 0.58 — so this branch is containment, not ratio. The re-assertion may be
+    // dead (this selector already inherits the earlier rule) or a copy wanting
+    // a shared class; the message hedges both.
+    else if (near && !same && near.shared === near.rule.declCount && near.shared >= MIN_FULL_REDECL)
+      out.push({
+        line: r.line,
+        msg: `redeclares an earlier block — \`${norm(r.selector)}\` repeats all ${near.shared} declarations of \`${norm(near.rule.selector)}\` at line ${near.rule.line}. Drop them if this selector already inherits that rule; lift the shared set onto a common class if not.`,
       });
     // Byte-identical bodies are rare in hand-written CSS; a copied component that then
     // drifted by one declaration is the common shape, and an equality test never sees it.
@@ -273,6 +310,26 @@ function ignoreLines(raw) {
     }
   });
   return ignore;
+}
+
+// Recurse a directory for stylesheets. Lets `audit.mjs src/` work on any Node
+// version — `fs.globSync` needs Node 22, and a bare directory used to be rejected.
+// An unreadable subtree (EACCES) is skipped, not crashed — every other failure
+// path prints a clean `(skipped: …)`, and a stack trace here would break that.
+function walkDir(dir) {
+  const out = [];
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...walkDir(p));
+    else if (STYLESHEET.test(e.name)) out.push(p);
+  }
+  return out;
 }
 
 function auditFile(path) {
@@ -414,6 +471,15 @@ function selfTest() {
     '.pb { font-family: monospace; font-weight: 400; text-transform: none; height: 3px; }',
     '.qa { color: navy; border: 0; outline: 0; z-index: 1; }',
     '.qb { color: navy; border: 0; outline: 0; z-index: 1; letter-spacing: 0; word-spacing: 0; text-indent: 0; opacity: 1; }',
+    '.da { color: navy; border: 0; background: red; z-index: 1; margin: 0; }',
+    '.db { color: navy; border: 0; background: red; z-index: 1; margin: 0; padding: 0; }',
+    '.z5 { border-inline-start: 3px solid red; border-radius: 10px / 0 10px; }',
+    '.z6 { border-inline-start: 3px solid red; border-radius: 8px / 4px; }',
+    '.z7 { border-inline-start: 3px solid red; border-radius: 4px 4px 0; }',
+    '@media print { @supports (color: red) { .z8 { color: teal; font-weight: 700; } } }',
+    '.z8 { color: teal; font-weight: 700; }',
+    '.za { @media print { .zb { color: olive; font-style: italic; } } }',
+    '.zb { color: olive; font-style: italic; }',
   ].join('\n');
   const prepared = prepare(src, 'test.css');
   const lineOf = makeLineLookup(prepared);
@@ -552,6 +618,22 @@ function selfTest() {
       !whole.some((f) => /repeated declarations/.test(f.msg) && f.msg.includes('`.x2`')),
     ],
     [
+      'two at-rules deep: same selector+decls as top-level not a duplicate (context scopes)',
+      !whole.some(
+        (f) =>
+          (f.line === 46 || f.line === 47) &&
+          /duplicate|repeated declarations|overlapping|redeclares/.test(f.msg),
+      ),
+    ],
+    [
+      'nested at-rule inside a rule: inner scoped, not a duplicate of the same selector top-level',
+      !whole.some(
+        (f) =>
+          (f.line === 48 || f.line === 49) &&
+          /duplicate|repeated declarations|overlapping|redeclares/.test(f.msg),
+      ),
+    ],
+    [
       'BLOCK: no false calc() on a custom property with a -digit tail',
       !has(block, 'whitespace') || !block.some((f) => f.line === 26),
     ],
@@ -566,8 +648,16 @@ function selfTest() {
       has(advise, 'flips in RTL') || has(advise, 'left and right corners differ'),
     ],
     [
-      'ADVISE: uniform radius beside a logical inline edge stays silent',
-      advise.filter((f) => /corners differ/.test(f.msg)).length === 1,
+      'ADVISE: uniform radius (plain and slash) beside a logical inline edge stays silent',
+      !advise.some((f) => /corners differ/.test(f.msg) && (f.line === 28 || f.line === 44)),
+    ],
+    [
+      'ADVISE: slash radius with an asymmetric vertical half fires',
+      advise.some((f) => f.line === 43 && /corners differ/.test(f.msg)),
+    ],
+    [
+      'ADVISE: three-value radius with BL != BR fires',
+      advise.some((f) => f.line === 45 && /corners differ/.test(f.msg)),
     ],
     [
       'ADVISE: grid-column 1 / -1 is a full span, not a reorder',
@@ -604,6 +694,14 @@ function selfTest() {
     [
       'four shared declarations in a much longer block are below the ratio',
       !whole.some((f) => f.line === 40 && /overlapping declarations/.test(f.msg)),
+    ],
+    [
+      'WHOLE catches a block that redeclares an entire earlier block',
+      whole.some((f) => f.line === 42 && /redeclares an earlier block/.test(f.msg)),
+    ],
+    [
+      'a 4-decl block fully inside a longer one is not a redeclaration',
+      !whole.some((f) => /redeclares an earlier block/.test(f.msg) && f.msg.includes('`.qb`')),
     ],
     ['no multi-line selector in a whole-file message', !whole.some((f) => f.msg.includes('\n'))],
     [
@@ -649,34 +747,88 @@ function selfTest() {
 }
 
 function main(args) {
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    return 0;
+  }
+  if (args.includes('--list-rules')) {
+    console.log('BLOCK — provable, fix:');
+    for (const r of BLOCK) console.log(`  ${r.msg}`);
+    console.log('\nADVISE — measurable, confirm or fix:');
+    for (const r of ADVISE) console.log(`  ${r.msg}`);
+    return 0;
+  }
   const strict = args.includes('--strict');
   const json = args.includes('--json');
-  const argv = args.filter((a) => a !== '--strict' && a !== '--json');
-  if (argv.length === 0) {
-    console.log('css-pro audit: no files given; running self-test.\n');
+  const wantsSelfTest = args.includes('--self-test');
+  const argv = args.filter(
+    (a) =>
+      a !== '--strict' &&
+      a !== '--json' &&
+      a !== '--self-test' &&
+      a !== '--help' &&
+      a !== '-h' &&
+      a !== '--list-rules',
+  );
+  if (wantsSelfTest || argv.length === 0) {
+    if (argv.length === 0 && !wantsSelfTest)
+      console.log('css-pro audit: no files given; running self-test.\n');
     return selfTest();
   }
   if (argv.some((a) => GLOB.test(a)) && typeof fs.globSync !== 'function') {
-    console.log('Glob arguments need Node 22 or newer; pass explicit file paths instead.');
+    if (json)
+      console.log(
+        JSON.stringify([
+          {
+            path: null,
+            line: null,
+            severity: 'error',
+            msg: 'glob arguments need Node 22 or newer; pass a directory or explicit file paths instead',
+          },
+        ]),
+      );
+    else
+      console.log(
+        'Glob arguments need Node 22 or newer; pass a directory or explicit file paths instead.',
+      );
     return 1;
   }
   let failed = 0;
+  // Skipped args (empty glob/dir, non-style file) are collected, not printed
+  // inline — printed inline they would precede the JSON array and break
+  // `JSON.parse(stdout)`. In --json they surface as error rows instead.
+  const skips = [];
   const paths = argv.flatMap((a) => {
-    if (!GLOB.test(a)) return a;
-    const hits = fs.globSync(a);
-    if (hits.length === 0) {
-      console.log(`== ${a} ==\n  (skipped: glob matched nothing)`);
-      failed++;
+    if (GLOB.test(a)) {
+      const hits = fs.globSync(a);
+      if (hits.length === 0) {
+        skips.push({ arg: a, msg: 'glob matched nothing', sev: 'error' });
+        failed++;
+      }
+      return hits;
     }
-    return hits;
+    const st = fs.statSync(a, { throwIfNoEntry: false });
+    if (st && st.isDirectory()) {
+      const hits = walkDir(a);
+      if (hits.length === 0) {
+        skips.push({ arg: a, msg: 'no .css/.scss/.sass/.less beneath it', sev: 'error' });
+        failed++;
+      }
+      return hits;
+    }
+    return a;
   });
 
   const results = [];
   for (const path of paths) {
     if (!STYLESHEET.test(path)) {
-      console.log(
-        `== ${path} ==\n  (skipped: audit targets .css/.scss/.sass/.less; the per-edit hook covers edits to other files)`,
-      );
+      // Non-style files are a benign skip (exit stays 0), not a failed arg —
+      // the per-edit hook covers edits to them, so the audit just ignores them.
+      skips.push({
+        arg: path,
+        msg: 'audit targets .css/.scss/.sass/.less; the per-edit hook covers edits to other files',
+        sev: 'note',
+      });
       continue;
     }
     const r = auditFile(path);
@@ -708,6 +860,8 @@ function main(args) {
 
   if (json) {
     const out = [];
+    for (const s of skips)
+      out.push({ path: s.arg, line: null, severity: s.sev, msg: `skipped: ${s.msg}` });
     for (const r of results) {
       if (r.error) {
         out.push({ path: r.path, line: null, severity: 'error', msg: r.error });
@@ -729,6 +883,7 @@ function main(args) {
     }
     console.log(JSON.stringify(out, null, 2));
   } else {
+    for (const s of skips) console.log(`== ${s.arg} ==\n  (skipped: ${s.msg})`);
     for (const r of results) report(r);
     console.log(
       `\n${counts.files} file(s): ${counts.block} BLOCK, ${counts.advise} ADVISE, ${counts.whole} WHOLE-FILE.`,

@@ -197,12 +197,17 @@ const INLINE_LOGICAL = /(?<![\w-])(?:border|padding|margin|inset)-inline(?:-(?:s
 const RADIUS = /(?<![\w-])border-radius\s*:\s*([^;}]+)/i;
 
 // `border-radius: a b c d` is TL TR BR BL. Left and right differ when TL !== TR or
-// BL !== BR. One value is uniform; two and three set TL=a and TR=b.
+// BL !== BR. The slash form `h / v` carries a separate vertical-radius set that
+// flips on its own, so a uniform horizontal half with an asymmetric vertical half
+// (`10px / 0 10px`) still contradicts the logical edge — check both halves.
+// Three values `a b c` are TL=a TR=b BR=c BL=b, so BL !== BR (b !== c) flips too.
 function flipsInRtl(value) {
-  const [a, b, c, d] = value.split('/')[0].trim().split(/\s+/);
-  if (b === undefined) return false;
-  if (d === undefined) return a !== b; // 2 or 3 values: TL=a, TR=b
-  return a !== b || d !== c;
+  return value.split('/').some((half) => {
+    const [a, b, c, d] = half.trim().split(/\s+/);
+    if (b === undefined) return false; // one value: uniform
+    if (d === undefined) return a !== b || (c !== undefined && b !== c); // 2 or 3
+    return a !== b || d !== c; // 4
+  });
 }
 
 function directionBlindRadius(added) {
