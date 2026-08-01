@@ -1,11 +1,11 @@
 ---
 name: css-audit
-description: Audit a whole stylesheet, or review a CSS or motion diff — re-reading existing code for defects the per-edit hook never re-checks: cleaning up legacy CSS, inheriting a sheet, auditing before a refactor. Audit runs the css-pro rule table over a whole file plus file-scale checks the hook cannot do. Review reads changed lines against the same bar. Not the mechanics — css-craft owns CSS mechanics, motion-craft owns motion decisions.
+description: Audit a whole stylesheet (CSS/SCSS/Sass/Less), or review a CSS or motion diff — re-reading existing code for defects the per-edit hook never re-checks: cleaning up legacy CSS, inheriting a sheet. Not the mechanics — css-craft owns CSS mechanics, motion-craft owns motion decisions.
 ---
 
 # CSS Audit
 
-The per-edit hook only checks the lines you touch, so pre-existing CSS never gets re-checked. A stylesheet accretes defects the hook would catch on a fresh write — `transition: all`, `calc()` with no whitespace, a longhand set before its shorthand, `100vh`. Two scales, one bar — only provable defects; a motion review adds feel judgment, and says so where it does. An **audit** reads the whole file; a **review** reads the changed lines of a diff.
+The per-edit hook only checks the lines you touch, so a stylesheet accretes defects it would catch on a fresh write — `transition: all`, `calc()` with no whitespace, a longhand set before its shorthand, `100vh`. Two scales, one bar — only provable defects; a motion review adds feel judgment. An **audit** reads the whole file; a **review** reads the changed lines of a diff.
 
 ## Audit — whole file
 
@@ -13,7 +13,7 @@ The per-edit hook only checks the lines you touch, so pre-existing CSS never get
 node "${CLAUDE_PLUGIN_ROOT}/skills/css-audit/audit.mjs" <file.css>...
 ```
 
-Pass every stylesheet; globs expand, so any enumeration of the project's CSS works. Prints `file:line` findings grouped by severity, uncapped, then a count; exits non-zero if any provable (BLOCK) defect remains. No arguments runs the self-test.
+Pass every stylesheet (`.css`/`.scss`/`.sass`/`.less`); globs expand inside the script, so any enumeration of the project's CSS works in any shell. Prints `file:line` findings grouped by severity, uncapped, then a count; exits non-zero if any provable (BLOCK) defect remains. No arguments runs the self-test.
 
 **Done when** every target file has been re-run and is clean, or carries only items kept on purpose — every remaining BLOCK a `file:line` with its keep-reason. ADVISE and whole-file findings are reported, not gated; each confirmed intentional, else fixed.
 
@@ -42,13 +42,13 @@ The rule table is the authority for provable defects. Where it and the motion li
 
 ### Flag these on sight (motion)
 
-Pull the values this list cites from motion-craft's [`SKILL.md`](../motion-craft/SKILL.md) ([`TECHNIQUES.md`](../motion-craft/TECHNIQUES.md) for the blur ceiling and `will-change` scope); when feel can't be judged from code alone, say so and point at `## Debugging` there.
+Pull the values this list cites from motion-craft's [`SKILL.md`](../motion-craft/SKILL.md) ([`TECHNIQUES.md`](../motion-craft/TECHNIQUES.md) for the blur ceiling and `will-change` scope); when feel can't be judged from code alone, say so and point at `## Debugging` in TECHNIQUES.md.
 
-`transition: all`; `scale(0)` or pure-fade entrances with no initial transform; `ease-in` on any UI interaction, or a built-in easing on entering/exiting or on-screen movement where an `--ease-*` token belongs (hover and colour changes keep `ease`); animation on keyboard shortcut / command-palette toggle / 100+per-day action; UI duration > 300ms with no stated reason (modals and drawers sit outside that bar — 200–500ms); `transform-origin: center` on trigger-anchored popover/dropdown/tooltip; keyframes on toasts/toggles/anything added or triggered rapidly; animating layout properties (`width`/`height`/`margin`/`padding`/`top`/`left`); Framer Motion `x`/`y`/`scale` shorthands where a full `transform` string would hand the animation off; updating a CSS variable on parent to drive a child transform; missing `prefers-reduced-motion` handling on movement; ungated `:hover` motion; symmetric enter/exit timing on press-and-release or hold; everything-at-once entrance where 30–80ms stagger belongs.
+`transition: all`; `scale(0)` or pure-fade entrances with no initial transform; `ease-in` on any UI interaction, or a built-in easing on entering/exiting or on-screen movement where an `--ease-*` token belongs (hover and colour changes keep `ease`); animation on a keyboard shortcut / command-palette toggle / high-frequency action; UI duration past motion-craft's bar with no stated reason (modals and drawers sit outside that bar); `transform-origin: center` on trigger-anchored popover/dropdown/tooltip; keyframes on toasts/toggles/anything added or triggered rapidly; animating layout properties (`width`/`height`/`margin`/`padding`/`top`/`left`); Framer Motion `x`/`y`/`scale` shorthands where a full `transform` string would hand the animation off; updating a CSS variable on parent to drive a child transform; missing `prefers-reduced-motion` handling on movement; ungated `:hover` motion; symmetric enter/exit timing on press-and-release or hold; everything-at-once entrance where a stagger belongs.
 
 ### Output format
 
-Two parts, this order.
+Two parts.
 
 **Part 1 — Findings table.** Single markdown table, one row per issue.
 
