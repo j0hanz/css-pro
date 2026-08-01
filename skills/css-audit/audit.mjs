@@ -104,9 +104,10 @@ function globalize(re) {
 // blanked so a `{` or `;` inside a string still cannot fool the parser, and lengths are
 // unchanged, so every line number still holds.
 function restoreStrings(prepared, src) {
+  // The pattern closes on a backreference, so the closing quote is the opening one.
   return prepared.replace(/(['"])[^'"\n]*\1/g, (m, q, off) => {
     const inner = src.slice(off + 1, off + m.length - 1).replace(/[{};]/g, ' ');
-    return q + inner + m[m.length - 1];
+    return q + inner + q;
   });
 }
 
