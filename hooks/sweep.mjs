@@ -14,6 +14,40 @@ const MAX_BYTES = 512 * 1024;
 const MAX_FINDINGS = 5;
 
 const NO_FALLBACK = /var\(\s*(--[\w-]+)\s*\)/g;
+const LINE_COMMENT = /\.(scss|sass|less|[cm]?[jt]sx?)$/i;
+
+function maskAddedLine(s, state, lineComment) {
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    const n = s[i + 1];
+    if (state.comment) {
+      if (c === '*' && n === '/') {
+        state.comment = false;
+        i++;
+      }
+      continue;
+    }
+    if (c === '/' && n === '*') {
+      state.comment = true;
+      i++;
+      continue;
+    }
+    if (lineComment && c === '/' && n === '/') break;
+    if (c === '"' || c === "'") {
+      const q = c;
+      i++;
+      while (i < s.length && s[i] !== q) {
+        if (s[i] === '\\') i++;
+        i++;
+      }
+      out += ' ';
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
 
 const AUDIT = fileURLToPath(new URL('../skills/css-audit/audit.mjs', import.meta.url));
 
@@ -52,6 +86,32 @@ if (process.argv[2] === '--self-test') {
       JSON.stringify(
         [...'a{--x:1;color:var(--x);border:var(--y, red)}'.matchAll(NO_FALLBACK)].map((m) => m[1]),
       ) === '["--x"]',
+    ],
+    [
+      'var() in a comment or string is not a read',
+      [
+        ...maskAddedLine(
+          '/* var(--a) */ content: "var(--b)"; color: var(--c);',
+          { comment: false },
+          false,
+        ).matchAll(NO_FALLBACK),
+      ].map((m) => m[1]) +
+        '' ===
+        '--c',
+    ],
+    [
+      'block comment state carries across lines',
+      (() => {
+        const st = { comment: false };
+        maskAddedLine('/* open var(--a)', st, false);
+        const masked = maskAddedLine('still comment var(--b) */ color: var(--c);', st, false);
+        return !masked.includes('--b') && masked.includes('--c');
+      })(),
+    ],
+    [
+      'line comments blank the rest of the line only for js/scss-less',
+      !maskAddedLine('// var(--a)', { comment: false }, true).includes('--a') &&
+        maskAddedLine('// not a comment: var(--a)', { comment: false }, false).includes('--a'),
     ],
   ];
   let fail = 0;
@@ -131,9 +191,13 @@ function undeclaredTokens({ cwd, root, git, diff, untracked }) {
   }
 
   const used = new Map();
+  const states = new Map();
   for (const a of added) {
     if (!AUDITABLE.test(a.file)) continue;
-    for (const m of a.text.matchAll(NO_FALLBACK))
+    let st = states.get(a.file);
+    if (!st) states.set(a.file, (st = { comment: false }));
+    const text = maskAddedLine(a.text, st, LINE_COMMENT.test(a.file));
+    for (const m of text.matchAll(NO_FALLBACK))
       if (!used.has(m[1])) used.set(m[1], `${relative(cwd, resolve(root, a.file))}:${a.line}`);
   }
   if (!used.size) return null;

@@ -1,10 +1,10 @@
 const blank = (s) => s.replace(/[^\n]/g, ' ');
 
 const LINE_COMMENT_LANGS = /\.(scss|sass|less|[cm]?[jt]sx?)$/i;
-const MARKUP_LANGS = /\.(html?|astro|vue|svelte)$/i;
+export const MARKUP_LANGS = /\.(html?|astro|vue|svelte)$/i;
 const HOST_CODE = /\.[cm]?[jt]sx?$/i;
 const STYLE_LANG = /\blang\s*=\s*["']?(?:scss|sass|less)/i;
-const MARKUP_ANCHOR = /<\/?(?:style|script)\b|\bstyle\s*=\s*["']|^---\r?$/im;
+export const MARKUP_ANCHOR = /<\/?(?:style|script)\b|\bstyle\s*=\s*["']|^---\r?$/im;
 
 export function prepare(text, filePath = '', sink) {
   if (MARKUP_LANGS.test(filePath) && MARKUP_ANCHOR.test(text)) return prepareMarkup(text, sink);

@@ -189,29 +189,49 @@ function directionBlindRadius(added) {
   return found(at.sort((a, b) => a - b));
 }
 
+function splitTopLevel(s, stop) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth = Math.max(0, depth - 1);
+    else if (depth === 0 && stop(c)) {
+      if (i > start) parts.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  if (s.length > start) parts.push(s.slice(start));
+  return parts;
+}
+
+const splitSelectorList = (s) => splitTopLevel(s, (c) => c === ',');
+
 function focusableMissingFocusVisible(added, readFile) {
   if (!/:focus-visible/i.test(added)) return null;
   const scope = readFile?.() ?? added;
   const focused = new Set();
   for (const m of eachBlock(scope))
     if (m[1].includes(':focus-visible'))
-      for (const part of m[1].split(',')) focused.add(baseOfSelector(part));
+      for (const part of splitSelectorList(m[1])) focused.add(baseOfSelector(part));
   if (focused.has('*')) return null;
   const at = [];
   for (const m of eachBlock(added))
     if (
       /(?<![\w-])cursor\s*:\s*pointer/i.test(m[2]) &&
-      !m[1].split(',').some((part) => focused.has(baseOfSelector(part)))
+      !splitSelectorList(m[1]).some((part) => focused.has(baseOfSelector(part)))
     )
       at.push(bodyStartOf(m));
   return found(at.sort((a, b) => a - b));
 }
 
 function baseOfSelector(sel) {
-  const last = sel
-    .trim()
-    .split(/\s*[>+~]\s*|\s+/)
-    .pop();
+  const parts = splitTopLevel(
+    sel.trim(),
+    (c) => c === '>' || c === '+' || c === '~' || /\s/.test(c),
+  );
+  const last = parts.length ? parts[parts.length - 1] : '';
   return (
     last
       .replace(/::?[\w-]+(\([^)]*\))?/g, '')

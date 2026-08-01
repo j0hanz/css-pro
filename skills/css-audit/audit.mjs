@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { prepare } from '../../hooks/strip.mjs';
+import { prepare, MARKUP_LANGS, MARKUP_ANCHOR } from '../../hooks/strip.mjs';
 import { BLOCK, ADVISE, STYLE_MARKERS, DECLARATION } from '../../hooks/rules.mjs';
 
 const STYLESHEET = /\.(css|scss|sass|less)$/i;
@@ -290,6 +290,11 @@ function customPropertyFindings(files) {
       add(declared, m[1], f.path, f.lineOf(m.index));
     for (const m of f.prepared.matchAll(/var\(\s*(--[\w-]+)/g))
       add(used, m[1], f.path, f.lineOf(m.index));
+    // JS-set tokens: setProperty('--x', v) is a declaration too (the hooks' token
+    // model counts it), but prepare blanks it out of host code, so scan raw.
+    // prepared === '' means anchor-less markup — prose mention is not a declaration.
+    for (const m of (f.prepared ? (f.raw ?? '') : '').matchAll(/setProperty\(\s*['"](--[\w-]+)/g))
+      add(declared, m[1], f.path, f.lineOf(m.index));
   }
 
   const out = [];
@@ -368,6 +373,15 @@ function lineLookupFor(raw, prepared, blocks) {
   return (idx) => lineAt(idx < raw.length ? idx : sourceOf(blocks, idx));
 }
 
+// A markup file with no style anchor holds no styles — without the anchor test,
+// prepare falls back to prepareCode and the whole document (prose included) is
+// scanned as flat CSS, so `never use transition: all` in a docs page produced a
+// BLOCK finding. One definition, used by auditFile and the self-test.
+function auditPrepare(raw, path, blocks) {
+  if (MARKUP_LANGS.test(path) && !MARKUP_ANCHOR.test(raw)) return '';
+  return prepare(raw, path, blocks);
+}
+
 function auditFile(path) {
   let raw;
   try {
@@ -376,7 +390,7 @@ function auditFile(path) {
     return { path, error: `unreadable: ${e.code || e.message}` };
   }
   const blocks = [];
-  const prepared = prepare(raw, path, blocks);
+  const prepared = auditPrepare(raw, path, blocks);
   // `prepare` keeps the source as a same-length prefix and appends synthetic blocks
   // for object-form styles and style="" attributes. An index past the source has no
   // position of its own — reporting one anyway printed `b.html:10` for an 8-line file
@@ -386,6 +400,7 @@ function auditFile(path) {
   const sass = SASS_INDENTED.test(path);
   return {
     path,
+    raw,
     prepared,
     lineOf,
     ignore: ignoreLines(raw),
@@ -576,9 +591,15 @@ function selfTest() {
   // to "start of file" would read as line 1 and fail rather than pass by accident.
   const onLine = (raw, name) => {
     const blocks = [];
-    const p = prepare(raw, name, blocks);
+    const p = auditPrepare(raw, name, blocks);
     return runTable(BLOCK, p, name, lineLookupFor(raw, p, blocks));
   };
+  // Markup holding prose but no style anchor: prepare's fallback scanned the whole
+  // document as CSS, and these two sentences produced BLOCK findings.
+  const proseBlock = onLine(
+    '<p>never write transition: all</p>\n<p>z-index: 9999 is bad</p>\n',
+    'prose.html',
+  );
   const attrBlock = onLine('<div\n  style="color: red; color: red"\n></div>\n', 'b.html');
   const objBlock = onLine(
     // Test data, not a declaration. styleObjectBlocks reads unblanked code on purpose
@@ -604,6 +625,28 @@ function selfTest() {
     'fc.css',
   );
   const focusNoVis = adviseOn('.btn { cursor: pointer; }', 'fn.css');
+  // The :focus-visible rule matches through a comma-bearing :is() list — a flat
+  // split on ',' used to shred it and flag .item as uncovered.
+  const focusIsCovered = adviseOn(
+    '.item { cursor: pointer; }\n.item:is(.a, .b):focus-visible { outline: 1px; }',
+    'fis.css',
+  );
+  // A token set from JS is declared even though prepare blanks the call site.
+  const jsSetProps = customPropertyFindings([
+    {
+      path: 'theme.ts',
+      raw: "document.documentElement.style.setProperty('--jsaccent', c);",
+      prepared: prepare("document.documentElement.style.setProperty('--jsaccent', c);", 'theme.ts'),
+      lineOf: makeLineLookup(
+        prepare("document.documentElement.style.setProperty('--jsaccent', c);", 'theme.ts'),
+      ),
+    },
+    {
+      path: 'use.css',
+      prepared: prepare('.x { color: var(--jsaccent); }', 'use.css'),
+      lineOf: makeLineLookup(prepare('.x { color: var(--jsaccent); }', 'use.css')),
+    },
+  ]);
   // A nested rule used to hide its parent from every block-scoped check — the flat block
   // regex cannot span the child's `{`, so only `&:hover` and `.icon` were ever scanned
   // and `.btn`'s own declarations went unread.
@@ -839,6 +882,15 @@ function selfTest() {
     [
       'ADVISE focus rule silent when the file does no :focus-visible at all',
       !has(focusNoVis, 'Interactive'),
+    ],
+    [
+      'ADVISE silent when :focus-visible coverage goes through :is()',
+      !has(focusIsCovered, 'Interactive'),
+    ],
+    ['BLOCK silent on anchor-less markup prose', proseBlock.length === 0],
+    [
+      'JS-set custom property counts as declared',
+      !jsSetProps.some((f) => /--jsaccent/.test(f.msg)),
     ],
     [
       'markup finding carries its SOURCE line, not a post-extraction line',
