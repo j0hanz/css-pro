@@ -115,19 +115,19 @@ function skipString(text, i) {
 // becomes its own x{...} block, so sibling and nested objects cannot combine into
 // declarations that were never adjacent.
 
-const REGION_OPEN =
-  /\b(?:(?:style|css|sx)\s*=\s*\{|(?:style|css|createStyles|keyframes)\s*\(|styled\s*(?:\.\w+|\(\s*["'][^"']*["']\s*\))\s*\()\s*\{/g;
-
 // A key with a quoted or numeric value; anything computed (template literal, ternary,
 // variable) is skipped — a value we cannot read is a rule we do not run.
 const PAIR =
   /(?:"([^"\n]+)"|'([^'\n]+)'|([A-Za-z_$][\w$]*))\s*:\s*(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|(-?(?:\d+\.?\d*|\.\d+)))/g;
 
 function styleObjectBlocks(code) {
+  // Built per call, not shared: scanObject drives lastIndex by hand, so a module-level
+  // regex would carry a position into the next call.
+  const region =
+    /\b(?:(?:style|css|sx)\s*=\s*\{|(?:style|css|createStyles|keyframes)\s*\(|styled\s*(?:\.\w+|\(\s*["'][^"']*["']\s*\))\s*\()\s*\{/g;
   const blocks = [];
-  REGION_OPEN.lastIndex = 0;
-  while (REGION_OPEN.exec(code)) {
-    REGION_OPEN.lastIndex = scanObject(code, REGION_OPEN.lastIndex, blocks);
+  while (region.exec(code)) {
+    region.lastIndex = scanObject(code, region.lastIndex, blocks);
   }
   return blocks;
 }
