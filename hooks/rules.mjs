@@ -67,7 +67,10 @@ export const ADVISE = [
     // transition, and no transform token, yet it is interaction-triggered movement of
     // the whole viewport — the most common unguarded vestibular trigger in a stylesheet.
     when: [/scroll-behavior\s*:\s*smooth/i],
-    absent: /prefers-reduced-motion/i,
+    // The guard has to turn THIS off. A `prefers-reduced-motion` block anywhere in the
+    // file used to silence this rule, so one reduced-motion rule for an unrelated
+    // animation vouched for a smooth scroll nothing had ever guarded.
+    absent: /scroll-behavior\s*:\s*auto/i,
     msg: 'Smooth scrolling is interaction-triggered movement of the whole viewport (WCAG 2.3.3) and a common vestibular trigger. Add `@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto } }`. Ignore if handled globally.',
   },
   {
@@ -170,9 +173,10 @@ const REORDER = [
   /(?<![\w-])order\s*:\s*-?[1-9]\d*/gi,
   /flex-direction\s*:\s*(?:row|column)-reverse/gi,
   /flex-flow\s*:[^;{}]*(?:row|column)-reverse/gi,
-  // `1 / -1` spans every track from the first line to the last. Spanning the whole grid
-  // cannot reorder anything, so it is not a signal — only an explicit numbered track is.
-  /(?<![\w-])grid-(?:row|column)(?:-(?:start|end))?\s*:\s*\d+(?!\s*\/\s*-1)/gi,
+  // `1 / -1` spans every track from the first line to the last, and line 1 is where flow
+  // would have put the item anyway. Neither can reorder anything, so neither is a signal
+  // — only placement onto a later track is.
+  /(?<![\w-])grid-(?:row|column)(?:-(?:start|end))?\s*:\s*(?!1\b)\d+(?!\s*\/\s*-1)/gi,
 ];
 
 function visualReorder(added) {

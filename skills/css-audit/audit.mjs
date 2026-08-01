@@ -54,6 +54,7 @@ function globalize(re) {
   return new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
 }
 
+// `prepare` blanks stylesheets in place, so offsets into `prepared` index `src` too.
 function restoreStrings(prepared, src) {
   return prepared.replace(/(['"])[^'"\n]*\1/g, (m, q, off) => {
     const inner = src.slice(off + 1, off + m.length - 1).replace(/[{};]/g, ' ');
@@ -114,11 +115,39 @@ function parseRules(text, lineOf) {
 }
 
 const MIN_REPEATED_DECLS = 2;
+// A partial overlap only earns a finding when it is big enough to lift out. Three
+// shared declarations is two type rules happening to agree; four is a copied component.
+const MIN_SHARED_DECLS = 4;
+// ...and when the shared set is most of both blocks. Count alone rewards long blocks
+// for agreeing on boilerplate — an 18-declaration rule sharing four `font-*` lines with
+// another is not a copy of it, and scoring on count reported two dozen such pairs.
+const MIN_OVERLAP_RATIO = 0.6;
+
+// The earlier rule this one most resembles, under the same conditions, scored as shared
+// over union. Ties go to the earliest line so the report is stable across runs.
+function nearestOverlap(byDecl, ctx, decls) {
+  const counts = new Map();
+  for (const d of decls)
+    for (const other of byDecl.get(`${ctx}\0${d}`) ?? [])
+      counts.set(other, (counts.get(other) ?? 0) + 1);
+  let best = null;
+  for (const [other, shared] of counts) {
+    const ratio = shared / (decls.length + other.declCount - shared);
+    if (!best || ratio > best.ratio || (ratio === best.ratio && other.line < best.rule.line))
+      best = { rule: other, shared, ratio };
+  }
+  return best;
+}
 
 function structureFindings(prepared, lineOf) {
   const rules = parseRules(prepared, lineOf);
   const out = [];
-  const seen = new Map();
+  // `context\0declaration` -> the rules that set it, in source order. Counting hits
+  // through this index finds a block's nearest neighbour without an O(n²) scan, and an
+  // identical block is just the case where every hit lands on one rule: ratio 1.
+  const byDecl = new Map();
+  // Also flattens the multi-line selector lists this prints, which would otherwise break
+  // the one-line-per-finding format the report promises.
   const norm = (s) =>
     s
       .replace(/\s+/g, ' ')
@@ -134,37 +163,60 @@ function structureFindings(prepared, lineOf) {
     if (isEmpty)
       out.push({
         line: r.line,
-        msg: `empty rule — \`${r.selector || '(unnamed)'}\` has no declarations.`,
+        msg: `empty rule — \`${norm(r.selector) || '(unnamed)'}\` has no declarations.`,
       });
     const decls = declsOf(r.body);
-    const key = `${norm(r.context)}\0${decls.join(';')}`;
-    const prev = seen.get(key);
-    if (!prev) {
-      seen.set(key, r);
-    } else if (norm(prev.selector) === norm(r.selector)) {
+    const ctx = norm(r.context);
+    // An empty block has nothing to index, so it could never meet another one. A
+    // sentinel key pairs two of them like any other identical pair. Deduped so a block
+    // that sets one property twice cannot score above 1.
+    const keys = decls.length ? [...new Set(decls)] : ['\0empty'];
+    // Matched on the declaration SET, so `.a{x;y}` and `.b{y;x}` are the same block —
+    // keyed on source order, every reordered copy of a block went unreported.
+    const near = nearestOverlap(byDecl, ctx, keys);
+    const same = near?.ratio === 1;
+    if (same && norm(near.rule.selector) === norm(r.selector))
       out.push({
         line: r.line,
-        msg: `duplicate block — \`${r.selector || '(unnamed)'}\` is identical to the one at line ${prev.line}.`,
+        msg: `duplicate block — \`${norm(r.selector) || '(unnamed)'}\` is identical to the one at line ${near.rule.line}.`,
       });
-    } else if (decls.length >= MIN_REPEATED_DECLS) {
+    else if (same && decls.length >= MIN_REPEATED_DECLS)
       out.push({
         line: r.line,
-        msg: `repeated declarations — \`${r.selector}\` sets the same ${decls.length} declarations as \`${prev.selector}\` at line ${prev.line}, under the same conditions. One selector list, or a shared class.`,
+        msg: `repeated declarations — \`${norm(r.selector)}\` sets the same ${decls.length} declarations as \`${norm(near.rule.selector)}\` at line ${near.rule.line}, under the same conditions. One selector list, or a shared class.`,
       });
+    // Byte-identical bodies are rare in hand-written CSS; a copied component that then
+    // drifted by one declaration is the common shape, and an equality test never sees it.
+    else if (near && near.shared >= MIN_SHARED_DECLS && near.ratio >= MIN_OVERLAP_RATIO)
+      out.push({
+        line: r.line,
+        msg: `overlapping declarations — \`${norm(r.selector)}\` shares ${near.shared} of its ${decls.length} declarations with \`${norm(near.rule.selector)}\` at line ${near.rule.line}, under the same conditions. Lift the shared set onto one selector list or a common class.`,
+      });
+    r.declCount = keys.length;
+    for (const d of keys) {
+      const k = `${ctx}\0${d}`;
+      if (!byDecl.has(k)) byDecl.set(k, []);
+      byDecl.get(k).push(r);
     }
   }
   return out;
 }
 
+// Inline axis only, both sides. `margin-top` is block-axis: it means the same thing in
+// every writing mode, so counting it as "physical" inflated the number with declarations
+// that carry no direction risk at all — on a real sheet most of the count was `top` and
+// `bottom`, and the figure measured nothing you could act on.
 const LOGICAL_PROP =
-  /(?<![\w-])(?:margin|padding|border|inset)-(?:block|inline)(?:-(?:start|end))?\s*:|(?<![\w-])(?:block|inline)-size\s*:|text-align\s*:\s*(?:start|end)\b/gi;
+  /(?<![\w-])(?:margin|padding|border|inset)-inline(?:-(?:start|end))?\s*:|(?<![\w-])inline-size\s*:|text-align\s*:\s*(?:start|end)\b/gi;
 const PHYSICAL_PROP =
-  /(?<![\w-])(?:margin|padding)-(?:top|right|bottom|left)\s*:|(?<![\w-])border-(?:top|right|bottom|left)(?:-(?:width|style|color))?\s*:|(?<![\w-])(?:top|right|bottom|left|inset)\s*:|text-align\s*:\s*(?:left|right)\b/gi;
+  /(?<![\w-])(?:margin|padding)-(?:right|left)\s*:|(?<![\w-])border-(?:right|left)(?:-(?:width|style|color))?\s*:|(?<![\w-])(?:right|left|inset)\s*:|text-align\s*:\s*(?:left|right)\b/gi;
 
 function directionMix(prepared) {
-  const logical = (prepared.match(LOGICAL_PROP) || []).length;
-  const physical = (prepared.match(PHYSICAL_PROP) || []).length;
-  return logical && physical ? { logical, physical } : null;
+  const logical = [...prepared.matchAll(LOGICAL_PROP)];
+  const physical = [...prepared.matchAll(PHYSICAL_PROP)];
+  return logical.length && physical.length
+    ? { logical: logical.length, physical: physical.length, at: physical.map((m) => m.index) }
+    : null;
 }
 
 function customPropertyFindings(files) {
@@ -280,16 +332,18 @@ function report(r) {
     console.log(`== ${r.path} ==\n  (skipped: ${r.error})`);
     return;
   }
-  const { path, mix } = r;
+  const { path, mix, lineOf } = r;
   const groups = GROUPS.filter(([key]) => r[key].length);
-  console.log(groups.length ? `== ${path} ==` : `== ${path} ==  clean`);
+  // `mix` counts toward the header: a file that printed `clean` and then a note about
+  // itself contradicted itself on two adjacent lines.
+  console.log(groups.length || mix ? `== ${path} ==` : `== ${path} ==  clean`);
   for (const [key, heading] of groups) {
     console.log(heading);
     for (const line of formatGroup(path, r[key])) console.log(line);
   }
   if (mix)
     console.log(
-      `  (note: mixes direction conventions — ${mix.logical} logical and ${mix.physical} physical declarations)`,
+      `  ${path}:${lineList(new Set(mix.at.map((i) => lineOf(i))))}  (note: mixes direction conventions — ${mix.physical} physical inline-axis declaration(s) here do not flip in RTL, but ${mix.logical} logical one(s) elsewhere in the file do)`,
     );
   if (SASS_INDENTED.test(path)) console.log(SASS_NOTE);
 }
@@ -326,6 +380,16 @@ function selfTest() {
     '.z3 { border-inline-start: 3px solid red; border-radius: 4px; }',
     '.z4 { grid-column: 1 / -1; }',
     '.cb { width: calc(var(--used) -8px); }',
+    '.g1 { grid-column: 1; }',
+    '.g2 { grid-column: 2; }',
+    '.oa { color: red; background: blue; }',
+    '.ob { background: blue; color: red; }',
+    '.na { font-family: serif; font-size: 1rem; line-height: 1.5; color: tan; margin: 0; }',
+    '.nb { font-family: serif; font-size: 1rem; line-height: 1.5; color: tan; padding: 0; }',
+    '.pa { font-family: monospace; font-weight: 400; text-transform: none; width: 3px; }',
+    '.pb { font-family: monospace; font-weight: 400; text-transform: none; height: 3px; }',
+    '.qa { color: navy; border: 0; outline: 0; z-index: 1; }',
+    '.qb { color: navy; border: 0; outline: 0; z-index: 1; letter-spacing: 0; word-spacing: 0; text-indent: 0; opacity: 1; }',
   ].join('\n');
   const prepared = prepare(src, 'test.css');
   const lineOf = makeLineLookup(prepared);
@@ -349,6 +413,18 @@ function selfTest() {
     { path: 'c.css', prepared: cPre, lineOf: makeLineLookup(cPre) },
     { path: 'd.css', prepared: dPre, lineOf: makeLineLookup(dPre) },
   ]);
+  const adviseOn = (css, name) => {
+    const p = prepare(css, name);
+    return runTable(ADVISE, p, name, makeLineLookup(p));
+  };
+  const smoothAdvise = adviseOn(
+    'html { scroll-behavior: smooth; }\n@media (prefers-reduced-motion: reduce) { .x { animation: none; } }',
+    'smooth.css',
+  );
+  const guardedAdvise = adviseOn(
+    'html { scroll-behavior: smooth; }\n@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }',
+    'guarded.css',
+  );
   const dupUnused = propsCD.filter((f) => f.msg.includes('--dup') && /never read/.test(f.msg));
   const nopeUndef = propsCD.filter((f) => f.msg.includes('--nope') && /not declared/.test(f.msg));
   const sites = (arr) => new Set(arr.map((f) => f.path));
@@ -462,11 +538,52 @@ function selfTest() {
     ],
     [
       'ADVISE: grid-column 1 / -1 is a full span, not a reorder',
-      !advise.some((f) => /Visual order/.test(f.msg)),
+      !advise.some((f) => f.line === 29 && /Visual order/.test(f.msg)),
     ],
+    [
+      'ADVISE: grid-column 1 is the flow default, not a reorder',
+      !advise.some((f) => f.line === 31 && /Visual order/.test(f.msg)),
+    ],
+    [
+      'ADVISE: grid-column 2 still reads as a reorder',
+      advise.some((f) => f.line === 32 && /Visual order/.test(f.msg)),
+    ],
+    [
+      'ADVISE: smooth scroll not vouched for by an unrelated reduced-motion block',
+      has(smoothAdvise, 'Smooth scrolling'),
+    ],
+    [
+      'ADVISE: smooth scroll silent once a guard sets scroll-behavior: auto',
+      !has(guardedAdvise, 'Smooth scrolling'),
+    ],
+    [
+      'WHOLE catches repeated declarations written in a different order',
+      whole.some((f) => f.line === 34 && /repeated declarations/.test(f.msg)),
+    ],
+    [
+      'WHOLE catches a four-declaration partial overlap',
+      whole.some((f) => f.line === 36 && /overlapping declarations/.test(f.msg)),
+    ],
+    [
+      'three shared declarations are below the overlap threshold',
+      !whole.some((f) => f.line === 38 && /overlapping declarations/.test(f.msg)),
+    ],
+    [
+      'four shared declarations in a much longer block are below the ratio',
+      !whole.some((f) => f.line === 40 && /overlapping declarations/.test(f.msg)),
+    ],
+    ['no multi-line selector in a whole-file message', !whole.some((f) => f.msg.includes('\n'))],
     [
       'direction mix counted only when both conventions appear',
       directionMix('.a{color:red}') === null,
+    ],
+    [
+      'direction mix ignores block-axis physical properties',
+      directionMix('.a{margin-inline-start:1px;margin-top:2px}') === null,
+    ],
+    [
+      'direction mix reports a line for each physical inline-axis site',
+      directionMix('.a{margin-inline-start:1px;margin-left:2px}')?.at.length === 1,
     ],
   ];
   let fail = 0;

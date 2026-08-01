@@ -31,8 +31,9 @@ Three groups, highest impact first. BLOCK and ADVISE messages are full sentences
 
 - _Empty rule_ — delete it, or fill it if it was meant to hold declarations.
 - _Duplicate block_ — same selector, same declarations; the later copy is dead. Delete it.
-- _Repeated declarations_ — two different selectors carrying byte-identical declarations under the same at-rule conditions. Merging them into one selector list, or onto a shared class, changes nothing a browser can observe. Fewer than two shared declarations is not reported.
-- _Mixes direction conventions_ — a count, not a finding: this file uses both logical (`padding-inline-start`) and physical (`padding-left`) properties. Which convention the project wants is its own call; that one file uses both is worth seeing. Nothing to dispose.
+- _Repeated declarations_ — two different selectors carrying the same declarations, in any order, under the same at-rule conditions. Merging them into one selector list, or onto a shared class, changes nothing a browser can observe. Fewer than two shared declarations is not reported.
+- _Overlapping declarations_ — the same, one declaration short of identical: a block copied from another and then drifted. Reported when the shared set is at least four declarations _and_ most of both blocks, so a long rule that merely agrees on some `font-*` lines does not fire.
+- _Mixes direction conventions_ — a note, not a finding, and it lists lines: this file uses both logical (`padding-inline-start`) and physical (`padding-left`) inline-axis properties, so the two flip apart under `direction: rtl`. Block-axis properties (`margin-top`, `bottom`) are not counted — they mean the same thing in every writing mode. Which convention the project wants is its own call. Nothing to dispose.
 - _Unused custom property_ — resolved across every sheet passed to the audit, so a prop read in a sibling sheet is not flagged. A remaining one is dead unless exported to a sheet you did not pass; confirm before deleting.
 - _Undefined custom property_ — resolved across every sheet passed. A remaining one is often a typo (`--color-primayr`), or lives in a sheet you did not pass.
 
