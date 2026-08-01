@@ -20,7 +20,7 @@ export const BLOCK = [
     msg: 'A `z-index` of 9999+ is not a stacking decision, it is a bid to win one. Use the project’s z-index scale or a token.',
   },
   {
-    re: /(?<![\w-])transition(?:-property)?\s*:[^;{}]*(?<![-\w])(?:(?:min|max)-(?:width|height)|width|height|margin|padding|top|left)\b/i,
+    re: /(?<![\w-])transition(?:-property)?\s*:[^;{}]*(?<![-\w])(?:(?:min|max)-(?:width|height|inline-size|block-size)|width|height|inline-size|block-size|margin|padding|inset|top|left|right|bottom|(?:(?:row|column)-)?gap)\b/i,
     msg: 'Transitioning a layout property runs layout and paint on every frame, on the main thread. Animate `transform` or `opacity` instead.',
   },
   {
