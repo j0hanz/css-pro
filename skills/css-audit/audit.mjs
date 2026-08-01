@@ -2,7 +2,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { prepare } from '../../hooks/strip.mjs';
-import { BLOCK, ADVISE } from '../../hooks/rules.mjs';
+import { BLOCK, ADVISE, STYLE_MARKERS, DECLARATION } from '../../hooks/rules.mjs';
 
 const STYLESHEET = /\.(css|scss|sass|less)$/i;
 // Everything the per-edit hook engages on. The audit used to accept STYLESHEET only,
@@ -10,6 +10,11 @@ const STYLESHEET = /\.(css|scss|sass|less)$/i;
 // 0 — a CI gate that audited nothing and passed. `prepare()` has always read these.
 const AUDITABLE = /\.(css|scss|sass|less|[cm]?[jt]sx?|vue|svelte|astro|html?)$/i;
 const GLOB = /[*?[\]{}]/;
+// A pattern only if nothing on disk answers to that exact name. SvelteKit and Next.js
+// put `[slug]` in real directory names, and globSync reads brackets as a character
+// class — `app/[id]/x.css` matched nothing, so the file went unaudited and the run
+// failed on a glob that was never a glob.
+const isGlob = (a) => GLOB.test(a) && !fs.statSync(a, { throwIfNoEntry: false });
 const SASS_INDENTED = /\.sass$/i;
 
 const USAGE = `css-pro audit — whole-file audit of stylesheets and the styles inside source files.
@@ -599,6 +604,37 @@ function selfTest() {
     'fc.css',
   );
   const focusNoVis = adviseOn('.btn { cursor: pointer; }', 'fn.css');
+  // A nested rule used to hide its parent from every block-scoped check — the flat block
+  // regex cannot span the child's `{`, so only `&:hover` and `.icon` were ever scanned
+  // and `.btn`'s own declarations went unread.
+  const nestedBlock = blockOn('.btn { color: red; color: red; &:hover { opacity: 1 } }', 'n.scss');
+  const nestedAdvise = adviseOn(
+    '.a:focus-visible { outline: 1px }\n.btn { cursor: pointer; .icon { color: red } }',
+    'n.scss',
+  );
+  // The per-edit hook's engagement gate, over the added text of one Write or Edit. The
+  // audit never consults it — it is tested here because this is the only importable
+  // entry point into the plugin, and a gate that engages on ordinary TypeScript turns a
+  // PreToolUse hook into a deny on code holding no CSS.
+  const engages = (t) => STYLE_MARKERS.test(t) || DECLARATION.test(t);
+  const GATE = [
+    [
+      false,
+      'interface Point {\n  x: number;\n  y: number;\n}\nconst prev = (i) => Math.max(0, i-1);',
+    ],
+    [false, '  onClick: () => void;\n  items: string[];\n  maxLen: 100;'],
+    [false, 'const n = Math.min(len-1, i+1);'],
+    [false, '  timeout: 3000,\n  version: "1.0.0",\n  ratio: 1.5,'],
+    [false, 'export function toGrid(rows: Row[]): Cell[][] {\n  return rows.map(toCells);\n}'],
+    [true, '  transition: all 0.3s;'],
+    [true, '  background-color: red;\n  background: blue;'],
+    [true, '  width: calc(100%-1px);'],
+    [true, '  color: var(--a, --b);'],
+    [true, '  padding: 4px;'],
+    [true, '  --brand: blue;'],
+    [true, 'const S = styled.div`color: red`;'],
+    [true, '<div style={{ color: "red" }} />'],
+  ];
   const dupUnused = propsCD.filter((f) => f.msg.includes('--dup') && /never read/.test(f.msg));
   const nopeUndef = propsCD.filter((f) => f.msg.includes('--nope') && /not declared/.test(f.msg));
   const sites = (arr) => new Set(arr.map((f) => f.path));
@@ -829,6 +865,15 @@ function selfTest() {
       nullLine.length === 1 && !nullLine[0].includes('x.tsx'),
     ],
     [
+      'BLOCK scans the parent block of a nested rule',
+      has(nestedBlock, 'set twice to the same value'),
+    ],
+    ['ADVISE scans the parent block of a nested rule', has(nestedAdvise, 'Interactive')],
+    ...GATE.map(([want, t]) => [
+      `hook gate ${want ? 'engages on' : 'ignores'}: ${t.split('\n')[0].trim().slice(0, 44)}`,
+      engages(t) === want,
+    ]),
+    [
       'csspro-ignore suppresses the marker line and the next',
       (() => {
         const ign = ignoreLines('a\n/* csspro-ignore */\nb\nc');
@@ -874,7 +919,7 @@ function main(args) {
       console.log('css-pro audit: no files given; running self-test.\n');
     return selfTest();
   }
-  if (argv.some((a) => GLOB.test(a)) && typeof fs.globSync !== 'function') {
+  if (argv.some(isGlob) && typeof fs.globSync !== 'function') {
     if (json)
       console.log(
         JSON.stringify([
@@ -897,8 +942,8 @@ function main(args) {
   // inline — printed inline they would precede the JSON array and break
   // `JSON.parse(stdout)`. In --json they surface as error rows instead.
   const skips = [];
-  const paths = argv.flatMap((a) => {
-    if (GLOB.test(a)) {
+  const resolved = argv.flatMap((a) => {
+    if (isGlob(a)) {
       const hits = fs.globSync(a);
       if (hits.length === 0) {
         skips.push({ arg: a, msg: 'glob matched nothing', sev: 'error' });
@@ -910,13 +955,31 @@ function main(args) {
     if (st && st.isDirectory()) {
       const hits = walkDir(a);
       if (hits.length === 0) {
-        skips.push({ arg: a, msg: 'no .css/.scss/.sass/.less beneath it', sev: 'error' });
+        skips.push({
+          arg: a,
+          msg: 'no stylesheet, CSS-in-JS, or single-file component beneath it',
+          sev: 'error',
+        });
         failed++;
       }
       return hits;
     }
     return a;
   });
+  // A directory argument and an explicit file inside it both resolve to that file.
+  // Auditing it twice printed every finding twice, and quadrupled its custom-property
+  // findings — those are collected per result, grouped by path, then applied per result.
+  // Keyed on the resolved path, not the string: `walkDir` builds `a\b.css` on Windows
+  // while the argument beside it reads `a/b.css`, and a set of raw strings sees two
+  // files. The argument's own spelling is what gets printed.
+  const seen = new Set();
+  const paths = [];
+  for (const p of resolved) {
+    const key = path.resolve(p);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    paths.push(p);
+  }
 
   const results = [];
   for (const path of paths) {

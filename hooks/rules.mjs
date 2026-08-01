@@ -10,6 +10,31 @@
 // A rule with a `files` regex runs only on paths it matches.
 // ADVISE is ordered by severity: the runtime shows the first three hits and withholds the rest.
 
+// --- engagement gate ------------------------------------------------------------
+// Not rules. These decide whether a NON-stylesheet file is worth running the tables
+// over at all; `runtime.mjs` is the only caller. They live here because a gate that
+// engages wrongly is not a wasted millisecond — it drags the BLOCK table across a file
+// holding no CSS and turns an ordinary write into a PreToolUse deny, so it needs to sit
+// somewhere the self-test can import.
+
+// In a .tsx file almost nothing is CSS. Engage only where styling actually lives, so
+// the common case costs one regex and an exit.
+export const STYLE_MARKERS =
+  /(?:styled|css|keyframes|createGlobalStyle)\s*[.(`]|(?:style|css|sx)\s*=\s*\{\{|createStyles\s*\(|\bstyle\s*\(\s*\{|<style[\s>]|\bstyle\s*=\s*["']/;
+
+// ...but an edit whose new_string holds only declarations — the usual way a styled block
+// already on disk gets changed — carries no marker at all, and used to exit before a
+// single rule ran. Matched narrowly on purpose. A bare `ident: ident` must NOT count:
+// that is every `x: number` in a TypeScript interface, and admitting it means
+// `Math.max(0, i-1)` in the same file reads as a malformed `calc()` and the write is
+// refused. What does count is a property no unquoted JS key can be — hyphenated or
+// `--` — or a value carrying a unit or a CSS function. Plain `transition` is named
+// because `transition: all` is the one BLOCK trigger with neither.
+export const DECLARATION =
+  /^[ \t]*(?:--[\w-]+|[a-z]+(?:-[a-z]+)+|transition)[ \t]*:[ \t]*\S|:[ \t]*[^;{}\n]*(?:\d(?:px|r?em|%|vh|vw|dvh|vmin|vmax|ms|s|deg|fr|ch|pt)(?![\w-])|var\(|calc\(|clamp\()/im;
+
+// --- the tables -----------------------------------------------------------------
+
 export const BLOCK = [
   {
     re: /transition(?:-property)?\s*:\s*all\b/i,
@@ -136,14 +161,35 @@ const BLOCK_RE = /(?<=^|[;{}])\s*([^{};]+)\{([^{}]*)\}/g;
 // A block's body ends just before the closing `}` that terminates the match.
 const bodyStartOf = (m) => m.index + m[0].length - 1 - m[2].length;
 
+// Every rule block, parents included. `BLOCK_RE` alone only ever matches an INNERMOST
+// block — its body group cannot span a child's `{` — so the parent of any nested rule
+// went unscanned, and the three block-scoped checks below silently skipped it. That is
+// the normal shape of SCSS and Less, and now of plain CSS too.
+// Each pass yields the current innermost layer and blanks it, selector and braces and
+// all, so the layer above becomes innermost next time round. Blanking preserves length
+// and newlines, so `m.index` and `bodyStartOf(m)` still index the original text; a
+// blanked child leaves a run of spaces in its parent's body, which carries no `;` and
+// so cannot read as one of the parent's declarations.
+function* eachBlock(text) {
+  for (let t = text; ;) {
+    const layer = [...t.matchAll(BLOCK_RE)];
+    if (!layer.length) return;
+    yield* layer;
+    t = t.replace(BLOCK_RE, (m) => m.replace(/[^\n]/g, ' '));
+  }
+}
+
 const found = (at) => (at.length ? at : null);
 
 // `--s-6` is ONE identifier: the `-6` is part of the name, not a subtraction. Blanking
 // custom-property identifiers before the test is the whole fix — without it every token
 // named `--s-1`, `--space-4`, `--z-10` made a valid `calc()` look malformed and the rule
 // refused the write.
+// `Math.` is excluded because `Math.max(0, i - 1)` and `Math.min(n-1, x)` are the same
+// shape as a malformed `calc()` and read as one — every JS file that reaches this table
+// has them, and a BLOCK finding there refuses a write holding no CSS at all.
 const MATH_NO_SPACE =
-  /\b(?:calc|clamp|min|max)\([^;{})]*?(?:[\w%] ?[+-][\d.(]|\) ?[+-][\d.(]|[%\d][+-] )/gi;
+  /(?<!Math\.)\b(?:calc|clamp|min|max)\([^;{})]*?(?:[\w%] ?[+-][\d.(]|\) ?[+-][\d.(]|[%\d][+-] )/gi;
 const blankCustomIdents = (s) => s.replace(/--[\w-]+/g, (m) => '_'.repeat(m.length));
 
 function mathWhitespace(added) {
@@ -152,7 +198,7 @@ function mathWhitespace(added) {
 
 function duplicateIdenticalDeclarations(added) {
   const at = [];
-  for (const m of added.matchAll(BLOCK_RE)) {
+  for (const m of eachBlock(added)) {
     const seen = new Map();
     let offset = bodyStartOf(m);
     for (const decl of m[2].split(';')) {
@@ -170,7 +216,9 @@ function duplicateIdenticalDeclarations(added) {
       offset += decl.length + 1; // + the ';' that split consumed
     }
   }
-  return found(at);
+  // Sorted because `eachBlock` walks innermost-first, not in source order, and `--json`
+  // prints these in array order.
+  return found(at.sort((a, b) => a - b));
 }
 
 const REORDER = [
@@ -212,12 +260,12 @@ function flipsInRtl(value) {
 
 function directionBlindRadius(added) {
   const at = [];
-  for (const m of added.matchAll(BLOCK_RE)) {
+  for (const m of eachBlock(added)) {
     if (!INLINE_LOGICAL.test(m[2])) continue;
     const r = RADIUS.exec(m[2]);
     if (r && flipsInRtl(r[1])) at.push(bodyStartOf(m) + r.index);
   }
-  return found(at);
+  return found(at.sort((a, b) => a - b));
 }
 
 // An interactive control (`cursor: pointer`) the author has not wired into any
@@ -230,7 +278,7 @@ function focusableMissingFocusVisible(added) {
   if (!/:focus-visible/i.test(added)) return null;
   const focused = new Set();
   const cursorBlocks = [];
-  for (const m of added.matchAll(BLOCK_RE)) {
+  for (const m of eachBlock(added)) {
     if (m[1].includes(':focus-visible'))
       for (const part of m[1].split(',')) focused.add(baseOfSelector(part));
     if (/(?<![\w-])cursor\s*:\s*pointer/i.test(m[2])) cursorBlocks.push(m);

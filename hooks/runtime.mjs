@@ -9,18 +9,13 @@
 import { readFileSync } from 'node:fs';
 import { text } from 'node:stream/consumers';
 import { prepare } from './strip.mjs';
-import { BLOCK, ADVISE } from './rules.mjs';
+import { BLOCK, ADVISE, STYLE_MARKERS, DECLARATION } from './rules.mjs';
 
 const MODE = process.argv[2];
 const ADVISORY_CAP = 3;
 
 const STYLESHEET = /\.(css|scss|sass|less)$/i;
 const HOST = /\.([cm]?[jt]sx?|vue|svelte|astro|html?)$/i;
-
-// In a .tsx file almost nothing is CSS. Engage only where styling actually lives, so
-// the common case costs one regex and an exit.
-const STYLE_MARKERS =
-  /(?:styled|css|keyframes|createGlobalStyle)\s*[.(`]|(?:style|css|sx)\s*=\s*\{\{|createStyles\s*\(|\bstyle\s*\(\s*\{|<style[\s>]|\bstyle\s*=\s*["']/;
 
 function addedText({ tool_name, tool_input = {} }) {
   if (tool_name === 'Write') return tool_input.content ?? '';
@@ -60,7 +55,7 @@ try {
 
   const raw = addedText(payload);
   if (!raw) process.exit(0);
-  if (!isSheet && !STYLE_MARKERS.test(raw)) process.exit(0);
+  if (!isSheet && !STYLE_MARKERS.test(raw) && !DECLARATION.test(raw)) process.exit(0);
 
   const added = prepare(raw, path);
 
