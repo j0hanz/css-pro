@@ -170,6 +170,21 @@ function nearestOverlap(byDecl, ctx, decls) {
   return best;
 }
 
+// Flattens multi-line selector lists and declaration bodies to one line, which
+// would otherwise break the one-line-per-finding format the report promises.
+// Module-level so the overlap decision can share it without a closure into the
+// structure scan.
+const norm = (s) =>
+  s
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([:;,{}])\s*/g, '$1')
+    .trim();
+const declsOf = (body) =>
+  body
+    .split(';')
+    .map(norm)
+    .filter((d) => d.includes(':'));
+
 function structureFindings(prepared, lineOf) {
   const rules = parseRules(prepared, lineOf);
   const out = [];
@@ -177,18 +192,6 @@ function structureFindings(prepared, lineOf) {
   // through this index finds a block's nearest neighbour without an O(n²) scan, and an
   // identical block is just the case where every hit lands on one rule: ratio 1.
   const byDecl = new Map();
-  // Also flattens the multi-line selector lists this prints, which would otherwise break
-  // the one-line-per-finding format the report promises.
-  const norm = (s) =>
-    s
-      .replace(/\s+/g, ' ')
-      .replace(/\s*([:;,{}])\s*/g, '$1')
-      .trim();
-  const declsOf = (body) =>
-    body
-      .split(';')
-      .map(norm)
-      .filter((d) => d.includes(':'));
   for (const r of rules) {
     const isEmpty = r.body.replace(/[;\s]/g, '') === '';
     if (isEmpty)
