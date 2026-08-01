@@ -216,7 +216,7 @@ function structureFindings(prepared, lineOf) {
         msg: `empty rule — \`${r.selector || '(unnamed)'}\` has no declarations.`,
       });
     const decls = declsOf(r.body);
-    const key = `${norm(r.context)} ${decls.join(';')}`;
+    const key = `${norm(r.context)}\0${decls.join(';')}`;
     const prev = seen.get(key);
     if (!prev) {
       seen.set(key, r);
