@@ -25,14 +25,12 @@ Three groups, highest impact first. BLOCK and ADVISE messages are full sentences
 
 **ADVISE** — measurable cost or accessibility risk, often intentional (handled globally, or a known trade-off). Capped to three on a write; the audit lists every occurrence with its line.
 
-**WHOLE-FILE** — only visible at file scale:
+**WHOLE-FILE** — only visible at file scale; the script names each finding and prints its line. What to do:
 
-- _Empty rule_ — selector with no declarations. Dead weight — delete; fill only if the selector was meant to hold declarations.
-- _Duplicate block_ — same selector and body appeared earlier. The later copy is dead; delete it.
-- _Unused custom property_ — `--name` declared, never read by `var()` in this file. May be exported for another sheet; if not, dead.
-- _Undefined custom property_ — `var(--name)` with no declaration in this file. Often a typo (`--color-primayr`); sometimes defined in another sheet.
-
-Custom-property findings span files: a prop unused in one sheet may be the API another reads — confirm across the project before deleting.
+- _Empty rule_ — delete it, or fill it if it was meant to hold declarations.
+- _Duplicate block_ — the later copy is dead; delete it.
+- _Unused custom property_ — resolved across every sheet passed to the audit, so a prop read in a sibling sheet is not flagged. A remaining one is dead unless exported to a sheet you did not pass; confirm before deleting.
+- _Undefined custom property_ — resolved across every sheet passed. A remaining one is often a typo (`--color-primayr`), or lives in a sheet you did not pass.
 
 ## Review — a diff
 
