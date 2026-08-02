@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { text } from 'node:stream/consumers';
+import { addedLines, AUDITABLE, DIFF_ARGS, lineKey, untrackedLines } from './changed.mjs';
 import { CUSTOM_PROPERTY_DECLARED } from './rules.mjs';
+import { stateFile } from './state.mjs';
 
 const EXTS = ['css', 'scss', 'sass', 'less', 'vue', 'svelte', 'astro', 'html', 'htm'];
 const STYLE_OR_MARKUP = new RegExp(`\\.(?:${EXTS.join('|')})$`, 'i');
@@ -22,6 +25,30 @@ function hasStyles(cwd) {
     { encoding: 'utf8', windowsHide: true },
   );
   return r.status === 0 && r.stdout.trim().length > 0;
+}
+
+const clock = () => String(Date.now() - 1000);
+
+function baseline(cwd) {
+  const run = (...args) => {
+    const r = spawnSync('git', ['-C', cwd, ...args], {
+      encoding: 'utf8',
+      windowsHide: true,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return r.status === 0 ? r.stdout : null;
+  };
+  const root = run('rev-parse', '--show-toplevel')?.trim();
+  if (!root) return clock();
+
+  const untracked = (run('ls-files', '-o', '--exclude-standard', '--full-name', '--', ':/') ?? '')
+    .split('\n')
+    .filter((p) => p && AUDITABLE.test(p));
+  const lines = [
+    ...addedLines(run(...DIFF_ARGS, 'HEAD') ?? run(...DIFF_ARGS) ?? ''),
+    ...untrackedLines(root, untracked),
+  ];
+  return `${clock()}\n${lines.map(lineKey).join('\n')}`;
 }
 
 function tokenSheets(cwd) {
@@ -71,7 +98,16 @@ if (process.argv[2] === '--self-test') {
 try {
   const payload = JSON.parse((await text(process.stdin)) || '{}');
   const cwd = payload.cwd || process.cwd();
-  if (!hasStyles(cwd)) process.exit(0);
+
+  const styles = hasStyles(cwd);
+  try {
+    writeFileSync(
+      stateFile('session', { session_id: payload.session_id }),
+      styles ? baseline(cwd) : clock(),
+    );
+  } catch {}
+
+  if (!styles) process.exit(0);
   const sheets = tokenSheets(cwd);
   process.stdout.write(
     JSON.stringify({

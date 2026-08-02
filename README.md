@@ -15,15 +15,19 @@ repo with no CSS it says nothing.
 **It blocks writes.** Eight rules refuse a write outright, because a defect that never
 reaches disk is cheaper than one you argue about afterwards. Each blocking rule is
 provable from the edit alone. Everything less certain advises instead, capped at three
-findings per edit so the channel stays readable.
+findings per edit so the channel stays readable, and said once: an advisory the file
+already carried before you touched it is never raised, and one you have already been
+given does not come back on the next edit to the same file.
 
 **It sweeps once more at the end of a turn.** The per-edit check reads the text of one
 write, which leaves two things it cannot see. CSS that reached disk another way — a shell
 heredoc, `sed`, a generator, a formatter — was never offered to it. And a defect only
 provable against the whole block, such as a declaration added onto a block that already
 carries it, reads as clean in the added lines alone. So at turn end the same eight rules
-run over the files `git` reports as changed, reporting only what lands on a changed line;
-nothing pre-existing is dragged in, and a finding is reported once, not once per turn.
+run over what changed, reporting only what lands on a changed line. The comparison is
+against the working tree as it stood when the session opened, not against your last
+commit, so a branch that was already half-finished when you arrived is not read back to
+you as something the agent did. A finding is reported once, not once per turn.
 
 **It resolves your tokens against the whole repository.** Every other check reads one
 file, so none of them can tell a real token from a typo — `var(--colour-brand)` looks the
@@ -70,8 +74,10 @@ The checks run automatically. There is nothing to invoke. They need `node` 18 or
 your `PATH` and nothing else — no bash, no `jq`, so they behave the same under Git Bash,
 PowerShell and a POSIX shell. Without `node` the hooks report an error and no write is
 ever blocked.
-The turn-end sweep also asks `git` what changed; outside a repository, or with no `git`,
-that sweep stays silent and every per-edit check is unaffected.
+The turn-end sweep also asks `git` what changed; outside a repository, with no `git`, or
+in a session that was already running when the plugin was installed and so has no
+baseline to compare against, that sweep stays silent and every per-edit check is
+unaffected.
 
 ## Skills
 

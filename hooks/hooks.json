@@ -31,8 +31,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/sweep.mjs\"",
-            "timeout": 20,
-            "statusMessage": "css-pro: sweeping changed CSS..."
+            "timeout": 20
           }
         ]
       }
@@ -43,8 +42,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/sweep.mjs\"",
-            "timeout": 20,
-            "statusMessage": "css-pro: sweeping changed CSS..."
+            "timeout": 20
           }
         ]
       }

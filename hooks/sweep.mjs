@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { fileURLToPath } from 'node:url';
-import { addedLines, AUDITABLE, AUDITABLE_GLOBS, DIFF_ARGS, ranges } from './changed.mjs';
+import {
+  addedLines,
+  AUDITABLE,
+  AUDITABLE_GLOBS,
+  DIFF_ARGS,
+  lineKey,
+  untrackedLines,
+} from './changed.mjs';
 import { CUSTOM_PROPERTY_DECLARED } from './rules.mjs';
+import { stateFile } from './state.mjs';
 
 const MAX_FILES = 40;
-const MAX_UNTRACKED = 40;
-const MAX_BYTES = 512 * 1024;
 const MAX_FINDINGS = 5;
 
 const NO_FALLBACK = /var\(\s*(--[\w-]+)\s*\)/g;
@@ -49,10 +55,26 @@ function maskAddedLine(s, state, lineComment) {
   return out;
 }
 
+function sessionGate(root, startedAt) {
+  const seen = new Map();
+  return (path) => {
+    let mtime = seen.get(path);
+    if (mtime === undefined) {
+      try {
+        mtime = statSync(resolve(root, path)).mtimeMs;
+      } catch {
+        mtime = null;
+      }
+      seen.set(path, mtime);
+    }
+    return mtime !== null && mtime >= startedAt;
+  };
+}
+
 const AUDIT = fileURLToPath(new URL('../skills/css-audit/audit.mjs', import.meta.url));
 
 if (process.argv[2] === '--self-test') {
-  const got = ranges(
+  const got = addedLines(
     [
       '--- a/one.css',
       '+++ b/one.css',
@@ -70,13 +92,24 @@ if (process.argv[2] === '--self-test') {
       '@@ -5,0 +9,2 @@',
     ].join('\n'),
   );
-  const shape = (p) => JSON.stringify(got.get(p) ?? null);
+  const at = (p) => got.filter((a) => a.file === p);
   const tests = [
-    ['single-line hunk is one line', shape('one.css').startsWith('[[3,3]')],
-    ['counted hunk spans its run', shape('one.css') === '[[3,3],[12,14]]'],
-    ['deleted target contributes nothing', !got.has('gone.css') && !got.has('/dev/null')],
-    ['a `+++ ` content line does not re-point the file', !got.has('spoof.css')],
-    ['hunks after a spoofed header stay with the real file', shape('two.css') === '[[2,2],[9,10]]'],
+    [
+      'an added line carries its new-file number and text',
+      JSON.stringify(at('one.css')) === '[{"file":"one.css","line":3,"text":"  color: red;"}]',
+    ],
+    ['a hunk with no added lines contributes nothing', got.length === 2],
+    ['a deleted target contributes nothing', !at('gone.css').length && !at('/dev/null').length],
+    ['a `+++ ` content line does not re-point the file', !at('spoof.css').length],
+    [
+      'a line after a spoofed header stays with the real file',
+      at('two.css').length === 1 && at('two.css')[0].line === 2,
+    ],
+    [
+      'the baseline key ignores line numbers and surrounding space',
+      lineKey({ file: 'a.css', line: 3, text: '  color: red;' }) ===
+        lineKey({ file: 'a.css', line: 99, text: 'color: red;' }),
+    ],
     [
       'every auditable glob is auditable',
       AUDITABLE_GLOBS.length > 0 && AUDITABLE_GLOBS.every((g) => AUDITABLE.test(g)),
@@ -113,6 +146,46 @@ if (process.argv[2] === '--self-test') {
       !maskAddedLine('// var(--a)', { comment: false }, true).includes('--a') &&
         maskAddedLine('// not a comment: var(--a)', { comment: false }, false).includes('--a'),
     ],
+    [
+      'an untracked file is enumerated whole, from line 1, and a missing one is skipped',
+      (() => {
+        const p = join(tmpdir(), 'css-pro-selftest-untracked.css');
+        writeFileSync(p, 'a{}\nb{}\n');
+        const got = untrackedLines(tmpdir(), [
+          'css-pro-selftest-untracked.css',
+          'css-pro-selftest-absent.css',
+        ]);
+        rmSync(p, { force: true });
+        return (
+          got.length === 3 &&
+          got[0].line === 1 &&
+          got[0].text === 'a{}' &&
+          got[1].line === 2 &&
+          got.every((a) => a.file === 'css-pro-selftest-untracked.css')
+        );
+      })(),
+    ],
+    [
+      'the session gate admits what was written after the session opened, and nothing older',
+      (() => {
+        const stamp = (name, ms) => {
+          const p = join(tmpdir(), name);
+          writeFileSync(p, 'a{}');
+          utimesSync(p, new Date(ms), new Date(ms));
+          return p;
+        };
+        const before = stamp('css-pro-selftest-before.css', 1_000);
+        const after = stamp('css-pro-selftest-after.css', 9_000);
+        const gate = sessionGate(tmpdir(), 5_000);
+        const ok =
+          !gate('css-pro-selftest-before.css') &&
+          gate('css-pro-selftest-after.css') &&
+          !gate('css-pro-selftest-absent.css');
+        rmSync(before, { force: true });
+        rmSync(after, { force: true });
+        return ok;
+      })(),
+    ],
   ];
   let fail = 0;
   for (const [name, ok] of tests) {
@@ -133,14 +206,13 @@ const capped = (rows, render, noun) => {
   );
 };
 
-function sweptCss({ cwd, root, diff, untracked }) {
-  const changed = ranges(diff);
-  for (const p of untracked) changed.set(p, [[1, Number.MAX_SAFE_INTEGER]]);
-
+function sweptCss({ cwd, root, added }) {
   const byPath = new Map();
-  for (const [p, spans] of changed) {
-    const abs = resolve(root, p);
-    if (AUDITABLE.test(p) && existsSync(abs)) byPath.set(abs, spans);
+  for (const a of added) {
+    if (!a.fresh) continue;
+    const abs = resolve(root, a.file);
+    if (!byPath.has(abs)) byPath.set(abs, new Set());
+    byPath.get(abs).add(a.line);
   }
   if (!byPath.size) return null;
 
@@ -156,19 +228,14 @@ function sweptCss({ cwd, root, diff, untracked }) {
   const rows = JSON.parse(run.stdout);
 
   const hits = rows
-    .filter(
-      (r) =>
-        r.severity === 'block' &&
-        r.line != null &&
-        (byPath.get(r.path) ?? []).some(([from, to]) => r.line >= from && r.line <= to),
-    )
+    .filter((r) => r.severity === 'block' && r.line != null && byPath.get(r.path)?.has(r.line))
     .sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
   if (!hits.length) return null;
 
   return (
-    'css-pro swept the CSS that changed on this branch. These are rules the per-edit ' +
-    'check refuses a write for; it did not see these, because they reached disk ' +
-    'outside Write/Edit or are only provable against the whole block:\n' +
+    'css-pro swept the CSS this session changed. These are rules the per-edit check ' +
+    'refuses a write for; it did not see these, because they reached disk outside ' +
+    'Write/Edit or are only provable against the whole block:\n' +
     capped(
       hits,
       (r) => `- ${relative(cwd, r.path).replace(/\\/g, '/')}:${r.line}  ${r.msg}`,
@@ -178,25 +245,14 @@ function sweptCss({ cwd, root, diff, untracked }) {
   );
 }
 
-function undeclaredTokens({ cwd, root, git, diff, untracked }) {
-  const added = addedLines(diff);
-  for (const p of untracked.filter((p) => AUDITABLE.test(p)).slice(0, MAX_UNTRACKED)) {
-    try {
-      const abs = resolve(root, p);
-      if (statSync(abs).size > MAX_BYTES) continue;
-      readFileSync(abs, 'utf8')
-        .split('\n')
-        .forEach((line, i) => added.push({ file: p, line: i + 1, text: line }));
-    } catch {}
-  }
-
+function undeclaredTokens({ cwd, root, git, added }) {
   const used = new Map();
   const states = new Map();
   for (const a of added) {
-    if (!AUDITABLE.test(a.file)) continue;
     let st = states.get(a.file);
     if (!st) states.set(a.file, (st = { comment: false }));
     const text = maskAddedLine(a.text, st, LINE_COMMENT.test(a.file));
+    if (!a.fresh) continue;
     for (const m of text.matchAll(NO_FALLBACK))
       if (!used.has(m[1])) used.set(m[1], `${relative(cwd, resolve(root, a.file))}:${a.line}`);
   }
@@ -232,6 +288,15 @@ function undeclaredTokens({ cwd, root, git, diff, untracked }) {
 try {
   const payload = JSON.parse((await text(process.stdin)) || '{}');
   if (payload.stop_hook_active) process.exit(0);
+  let startedAt = NaN;
+  let before = [];
+  try {
+    const mark = readFileSync(stateFile('session', { session_id: payload.session_id }), 'utf8');
+    const nl = mark.indexOf('\n');
+    startedAt = Number(nl === -1 ? mark : mark.slice(0, nl));
+    before = nl === -1 ? [] : mark.slice(nl + 1).split('\n');
+  } catch {}
+  if (!(startedAt > 0)) process.exit(0);
 
   const cwd = payload.cwd || process.cwd();
   const git = (...args) => {
@@ -245,14 +310,21 @@ try {
   const root = git('rev-parse', '--show-toplevel')?.trim();
   if (!root) process.exit(0);
 
+  const baseline = new Set(before);
+  const touched = sessionGate(root, startedAt);
+  const untracked = (git('ls-files', '-o', '--exclude-standard', '--full-name', '--', ':/') ?? '')
+    .split('\n')
+    .filter((p) => p && AUDITABLE.test(p) && touched(p));
   const shared = {
     cwd,
     root,
     git,
-    diff: git(...DIFF_ARGS, 'HEAD') ?? git(...DIFF_ARGS) ?? '',
-    untracked: (git('ls-files', '-o', '--exclude-standard', '--full-name', '--', ':/') ?? '')
-      .split('\n')
-      .filter(Boolean),
+    added: [
+      ...addedLines(git(...DIFF_ARGS, 'HEAD') ?? git(...DIFF_ARGS) ?? ''),
+      ...untrackedLines(root, untracked),
+    ]
+      .filter((a) => AUDITABLE.test(a.file) && touched(a.file))
+      .map((a) => ({ ...a, fresh: !baseline.has(lineKey(a)) })),
   };
 
   const parts = [];
@@ -271,11 +343,7 @@ try {
 
   const body = parts.join('\n\n');
   if (body) {
-    const stamp = join(
-      tmpdir(),
-      `css-pro-sweep-${String(payload.session_id ?? 'main').replace(/[^\w-]/g, '_')}` +
-        `${payload.agent_id ? `-${String(payload.agent_id).replace(/[^\w-]/g, '_')}` : ''}.txt`,
-    );
+    const stamp = stateFile('sweep', payload);
     let last = '';
     try {
       last = readFileSync(stamp, 'utf8');

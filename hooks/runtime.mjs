@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, statSync } from 'node:fs';
 import { text } from 'node:stream/consumers';
 import { prepare } from './strip.mjs';
 import { BLOCK, ADVISE, STYLE_MARKERS, DECLARATION } from './rules.mjs';
+import { stateFile } from './state.mjs';
 
 const MODE = process.argv[2];
 const ADVISORY_CAP = 3;
+const MAX_BASELINE_BYTES = 512 * 1024;
 
 const STYLESHEET = /\.(css|scss|sass|less)$/i;
 const HOST = /\.([cm]?[jt]sx?|vue|svelte|astro|html?)$/i;
@@ -16,6 +18,21 @@ function addedText({ tool_name, tool_input = {} }) {
   if (tool_name === 'MultiEdit')
     return (tool_input.edits ?? []).map((e) => e.new_string ?? '').join('\n');
   return '';
+}
+
+function recalled(ledger) {
+  try {
+    return new Set(readFileSync(ledger, 'utf8').split('\n'));
+  } catch {
+    return new Set();
+  }
+}
+
+function remember(ledger, keys) {
+  if (!keys.length) return;
+  try {
+    appendFileSync(ledger, keys.join('\n') + '\n');
+  } catch {}
 }
 
 function run(rules, added, readFile, path) {
@@ -64,7 +81,20 @@ try {
     return cached;
   };
 
+  const ledger = stateFile('said', payload);
+  const key = (msg) => `${path}\t${msg}`;
+
   if (MODE === 'pre') {
+    if (!recalled(ledger).has(key(''))) {
+      try {
+        if (statSync(path).size <= MAX_BASELINE_BYTES) {
+          const before = readFile();
+          if (before !== null) remember(ledger, run(ADVISE, before, readFile, path).map(key));
+        }
+      } catch {}
+      remember(ledger, [key('')]);
+    }
+
     const blocks = run(BLOCK, added, () => null, path);
     if (blocks.length) {
       process.stdout.write(
@@ -81,10 +111,12 @@ try {
       );
     }
   } else if (MODE === 'post') {
-    const advisories = run(ADVISE, added, readFile, path);
+    const said = recalled(ledger);
+    const advisories = run(ADVISE, added, readFile, path).filter((m) => !said.has(key(m)));
     if (advisories.length) {
       const shown = advisories.slice(0, ADVISORY_CAP);
       const withheld = advisories.length - shown.length;
+      remember(ledger, shown.map(key));
       process.stdout.write(
         JSON.stringify({
           hookSpecificOutput: {

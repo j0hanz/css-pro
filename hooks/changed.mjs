@@ -1,3 +1,6 @@
+import { readFileSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 const EXTS = [
   'css',
   'scss',
@@ -28,6 +31,24 @@ export const AUDITABLE_GLOBS = EXTS.map((e) => `*.${e}`);
 
 export const DIFF_ARGS = ['diff', '-U0', '--no-color', '--no-ext-diff'];
 
+const MAX_UNTRACKED = 40;
+const MAX_BYTES = 512 * 1024;
+
+export const lineKey = (a) => `${a.file}\t${a.text.trim()}`;
+
+export function untrackedLines(root, paths) {
+  const out = [];
+  for (const file of paths.slice(0, MAX_UNTRACKED)) {
+    try {
+      if (statSync(resolve(root, file)).size > MAX_BYTES) continue;
+      readFileSync(resolve(root, file), 'utf8')
+        .split('\n')
+        .forEach((text, i) => out.push({ file, line: i + 1, text }));
+    } catch {}
+  }
+  return out;
+}
+
 const HUNK = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
 function* hunks(diff) {
@@ -50,16 +71,6 @@ function* hunks(diff) {
     prev = line;
   }
   if (cur) yield cur;
-}
-
-export function ranges(diff) {
-  const out = new Map();
-  for (const h of hunks(diff)) {
-    if (h.count <= 0) continue;
-    if (!out.has(h.file)) out.set(h.file, []);
-    out.get(h.file).push([h.start, h.start + h.count - 1]);
-  }
-  return out;
 }
 
 export function addedLines(diff) {
