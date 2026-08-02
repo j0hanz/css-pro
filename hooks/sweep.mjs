@@ -54,7 +54,7 @@ export function sessionGate(root, startedAt) {
   };
 }
 
-function sweptCss({ cwd, root, added, said }) {
+function missedBlockRules({ cwd, root, added, said }) {
   const byPath = new Map();
   for (const a of added) {
     if (!a.fresh) continue;
@@ -67,18 +67,18 @@ function sweptCss({ cwd, root, added, said }) {
   const swept = [...byPath.keys()].slice(0, MAX_FILES);
   const unswept = byPath.size - swept.length;
 
-  const run = spawnSync(process.execPath, [AUDIT, '--json', ...swept], {
+  const audit = spawnSync(process.execPath, [AUDIT, '--json', ...swept], {
     encoding: 'utf8',
     cwd,
     windowsHide: true,
     maxBuffer: 16 * 1024 * 1024,
   });
-  const rows = JSON.parse(run.stdout)
+  const rows = JSON.parse(audit.stdout)
     .filter((r) => r.severity === 'block' && r.line != null && byPath.get(r.path)?.has(r.line))
     .sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line)
     .map((r) => {
-      const at = `${relative(cwd, r.path).replace(/\\/g, '/')}:${r.line}`;
-      return { key: `${at}\t${r.msg}`, text: `- ${at}  ${r.msg}` };
+      const where = `${relative(cwd, r.path).replace(/\\/g, '/')}:${r.line}`;
+      return { key: `${where}\t${r.msg}`, text: `- ${where}  ${r.msg}` };
     })
     .filter((r) => !said.has(r.key));
   if (!rows.length) return null;
@@ -164,9 +164,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     let before = [];
     try {
       const mark = readFileSync(stateFile('session', { session_id: payload.session_id }), 'utf8');
-      const nl = mark.indexOf('\n');
-      startedAt = Number(nl === -1 ? mark : mark.slice(0, nl));
-      before = nl === -1 ? [] : mark.slice(nl + 1).split('\n');
+      const newline = mark.indexOf('\n');
+      startedAt = Number(newline === -1 ? mark : mark.slice(0, newline));
+      before = newline === -1 ? [] : mark.slice(newline + 1).split('\n');
     } catch {}
     if (!(startedAt > 0)) process.exit(0);
 
@@ -182,10 +182,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const root = git('rev-parse', '--show-toplevel')?.trim();
     if (!root) process.exit(0);
 
-    const stamp = stateFile('sweep', { session_id: payload.session_id });
+    const ledger = stateFile('sweep', { session_id: payload.session_id });
     let said = new Set();
     try {
-      said = new Set(readFileSync(stamp, 'utf8').split('\n'));
+      said = new Set(readFileSync(ledger, 'utf8').split('\n'));
     } catch {}
 
     const baseline = new Set(before);
@@ -193,7 +193,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const untracked = (git('ls-files', '-o', '--exclude-standard', '--full-name', '--', ':/') ?? '')
       .split('\n')
       .filter((p) => p && AUDITABLE.test(p) && touched(p));
-    const shared = {
+    const scan = {
       cwd,
       root,
       git,
@@ -208,9 +208,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
     const parts = [];
     const record = [];
-    for (const check of [sweptCss, undeclaredTokens]) {
+    for (const check of [missedBlockRules, undeclaredTokens]) {
       try {
-        const part = check(shared);
+        const part = check(scan);
         if (!part) continue;
         record.push(...part.keys);
         if (part.text) parts.push(part.text);
@@ -220,7 +220,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
     if (record.length) {
       try {
-        appendFileSync(stamp, record.join('\n') + '\n');
+        appendFileSync(ledger, record.join('\n') + '\n');
       } catch {}
     }
     if (!parts.length) process.exit(0);

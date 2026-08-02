@@ -20,7 +20,7 @@ export const BLOCK = [
     msg: 'Transitioning a layout property runs layout and paint on every frame, on the main thread. Animate `transform` or `opacity` instead.',
   },
   {
-    fn: mathWhitespace,
+    fn: mathMissingWhitespace,
     msg: '`calc()` requires whitespace around `+` and `-`. Without it the expression is invalid and the whole declaration is dropped.',
   },
   {
@@ -120,10 +120,10 @@ export function parseRules(text) {
       return;
     }
     const raw = text.slice(start, i);
-    const stmt = raw.lastIndexOf(';') + 1;
-    const tail = raw.slice(stmt);
+    const afterSemicolon = raw.lastIndexOf(';') + 1;
+    const tail = raw.slice(afterSemicolon);
     const head = tail.trim();
-    const at = start + stmt + tail.match(/^\s*/)[0].length;
+    const at = start + afterSemicolon + tail.match(/^\s*/)[0].length;
     const sel = prefix ? (head ? `${prefix} ${head}` : prefix) : head;
     const cond = head.startsWith('@') ? (atRules ? `${atRules} ${head}` : head) : atRules;
     i++;
@@ -143,10 +143,10 @@ export function parseRules(text) {
       if (semi >= 0) segs.push({ at: i, text: seg.slice(0, semi + 1) });
       const nestedSel = (semi >= 0 ? seg.slice(semi + 1) : seg).trim();
       i = j;
-      const nestedAt = nestedSel.startsWith('@');
+      const nestedIsAtRule = nestedSel.startsWith('@');
       block(
-        nestedAt || !nestedSel ? sel : `${sel} ${nestedSel}`,
-        nestedAt ? (cond ? `${cond} ${nestedSel}` : nestedSel) : cond,
+        nestedIsAtRule || !nestedSel ? sel : `${sel} ${nestedSel}`,
+        nestedIsAtRule ? (cond ? `${cond} ${nestedSel}` : nestedSel) : cond,
       );
     }
     const body = segs.map((s) => s.text).join('');
@@ -194,7 +194,7 @@ const MATH_NO_SPACE =
   /(?<!Math\.)\b(?:calc|clamp|min|max)\([^;{})]*?(?:[\w%] ?[+-][\d.(]|\) ?[+-][\d.(]|[%\d][+-] )/gi;
 const blankCustomIdents = (s) => s.replace(/--[\w-]+/g, (m) => '_'.repeat(m.length));
 
-function mathWhitespace(added) {
+function mathMissingWhitespace(added) {
   return [...blankCustomIdents(added).matchAll(MATH_NO_SPACE)].map((m) => m.index);
 }
 

@@ -16,7 +16,7 @@ function addedText({ tool_name, tool_input = {} }) {
   return '';
 }
 
-function recalled(ledger) {
+function recall(ledger) {
   try {
     return new Set(readFileSync(ledger, 'utf8').split('\n'));
   } catch {
@@ -31,8 +31,8 @@ function remember(ledger, keys) {
   } catch {}
 }
 
-const fired = (rules, added, readFile, path) =>
-  runRules(rules, added, path, readFile).map((h) => h.msg);
+const firedMessages = (rules, text, path, readFile) =>
+  runRules(rules, text, path, readFile).map((h) => h.msg);
 
 try {
   const payload = JSON.parse((await text(process.stdin)) || '{}');
@@ -60,19 +60,24 @@ try {
 
   const ledger = stateFile('said', payload);
   const key = (msg) => `${path}\t${msg}`;
+  const BASELINED = key('');
+
+  // Advisories the file already carried count as said, so post only reports what this write added.
+  function baselineExistingAdvisories() {
+    try {
+      if (statSync(path).size <= MAX_BYTES) {
+        const before = readFile();
+        if (before !== null)
+          remember(ledger, firedMessages(ADVISE, before, path, readFile).map(key));
+      }
+    } catch {}
+    remember(ledger, [BASELINED]);
+  }
 
   if (MODE === 'pre') {
-    if (!recalled(ledger).has(key(''))) {
-      try {
-        if (statSync(path).size <= MAX_BYTES) {
-          const before = readFile();
-          if (before !== null) remember(ledger, fired(ADVISE, before, readFile, path).map(key));
-        }
-      } catch {}
-      remember(ledger, [key('')]);
-    }
+    if (!recall(ledger).has(BASELINED)) baselineExistingAdvisories();
 
-    const blocks = fired(BLOCK, added, () => null, path);
+    const blocks = firedMessages(BLOCK, added, path, () => null);
     if (blocks.length) {
       process.stdout.write(
         JSON.stringify({
@@ -88,8 +93,10 @@ try {
       );
     }
   } else if (MODE === 'post') {
-    const said = recalled(ledger);
-    const advisories = fired(ADVISE, added, readFile, path).filter((m) => !said.has(key(m)));
+    const said = recall(ledger);
+    const advisories = firedMessages(ADVISE, added, path, readFile).filter(
+      (m) => !said.has(key(m)),
+    );
     if (advisories.length) {
       const { shown, note } = cap(advisories, ADVISORY_CAP, 'finding(s)');
       remember(ledger, shown.map(key));

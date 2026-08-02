@@ -21,19 +21,21 @@ const BRIEF =
   'not Tailwind. Whole-file cleanup: css-audit skill.';
 
 function hasStyles(cwd) {
-  const root = cwd.replace(/\\/g, '/');
+  const dir = cwd.replace(/\\/g, '/');
   const r = spawnSync(
     'git',
-    ['-C', root, 'ls-files', '--cached', '--others', '--exclude-standard', '--', ...STYLE_GLOBS],
+    ['-C', dir, 'ls-files', '--cached', '--others', '--exclude-standard', '--', ...STYLE_GLOBS],
     { encoding: 'utf8', windowsHide: true },
   );
   return r.status === 0 && r.stdout.trim().length > 0;
 }
 
-const clock = () => String(Date.now() - 1000);
+// The mark is compared against file mtimes, which can lag the wall clock.
+const MTIME_SLACK_MS = 1000;
+const sessionStart = () => String(Date.now() - MTIME_SLACK_MS);
 
 function baseline(cwd) {
-  const run = (...args) => {
+  const git = (...args) => {
     const r = spawnSync('git', ['-C', cwd, ...args], {
       encoding: 'utf8',
       windowsHide: true,
@@ -41,17 +43,17 @@ function baseline(cwd) {
     });
     return r.status === 0 ? r.stdout : null;
   };
-  const root = run('rev-parse', '--show-toplevel')?.trim();
-  if (!root) return clock();
+  const root = git('rev-parse', '--show-toplevel')?.trim();
+  if (!root) return sessionStart();
 
-  const untracked = (run('ls-files', '-o', '--exclude-standard', '--full-name', '--', ':/') ?? '')
+  const untracked = (git('ls-files', '-o', '--exclude-standard', '--full-name', '--', ':/') ?? '')
     .split('\n')
     .filter((p) => p && AUDITABLE.test(p));
   const lines = [
-    ...addedLines(run(...DIFF_ARGS, 'HEAD') ?? run(...DIFF_ARGS) ?? ''),
+    ...addedLines(git(...DIFF_ARGS, 'HEAD') ?? git(...DIFF_ARGS) ?? ''),
     ...untrackedLines(root, untracked),
   ];
-  return `${clock()}\n${lines.map(lineKey).join('\n')}`;
+  return `${sessionStart()}\n${lines.map(lineKey).join('\n')}`;
 }
 
 try {
@@ -62,7 +64,7 @@ try {
   try {
     writeFileSync(
       stateFile('session', { session_id: payload.session_id }),
-      styles ? baseline(cwd) : clock(),
+      styles ? baseline(cwd) : sessionStart(),
     );
   } catch {}
 
