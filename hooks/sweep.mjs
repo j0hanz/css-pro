@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { text } from 'node:stream/consumers';
@@ -166,6 +166,97 @@ if (process.argv[2] === '--self-test') {
       })(),
     ],
     [
+      'a finding already reported this session is not reported again, and a new one ' +
+        'arrives alone',
+      (() => {
+        const part = (...names) => ({
+          lead: 'lead:\n',
+          noun: 'thing(s)',
+          tail: '\ntail',
+          rows: names.map((n) => ({ key: n, text: `- ${n}` })),
+        });
+        const said = new Set();
+        const first = emit(part('a', 'b'), said);
+        first.keys.forEach((k) => said.add(k));
+        const again = emit(part('a', 'b'), said);
+        const grown = emit(part('a', 'b', 'c'), said);
+        return (
+          first.text === 'lead:\n- a\n- b\ntail' &&
+          again === null &&
+          grown.text === 'lead:\n- c\ntail'
+        );
+      })(),
+    ],
+    [
+      'the vendor search reaches a node_modules at any depth, not only the root one',
+      (() => {
+        let seen = [];
+        declaredNames(
+          (...args) => {
+            seen = args;
+            return '';
+          },
+          '*node_modules/',
+          ['--no-exclude-standard'],
+        );
+        return (
+          seen.includes('--no-exclude-standard') &&
+          seen.includes(':/*node_modules/*.css') &&
+          !seen.includes(':/node_modules/*.css')
+        );
+      })(),
+    ],
+    [
+      'a token an installed package declares is settled, and not searched for again',
+      (() => {
+        const added = [{ file: 'a.css', line: 1, text: 'a{color:var(--bs-primary)}', fresh: true }];
+        // Repo search finds nothing; only the ignored-tree search declares the name.
+        const vendor = (...args) => (args.includes('--no-exclude-standard') ? '--bs-primary:' : '');
+        const settled = [];
+        const first = undeclaredTokens({
+          cwd: '.',
+          root: '.',
+          git: vendor,
+          added,
+          said: new Set(),
+          settled,
+        });
+        let searches = 0;
+        const counted = (...args) => {
+          if (args.includes('--no-exclude-standard')) searches++;
+          return vendor(...args);
+        };
+        const next = undeclaredTokens({
+          cwd: '.',
+          root: '.',
+          git: counted,
+          added,
+          said: new Set(settled),
+          settled: [],
+        });
+        return first === null && settled.join() === '--bs-primary' && next === null && !searches;
+      })(),
+    ],
+    [
+      'only the findings actually shown are marked reported, so the capped ones return',
+      (() => {
+        const rows = Array.from({ length: MAX_FINDINGS + 2 }, (_, i) => ({
+          key: `k${i}`,
+          text: `- k${i}`,
+        }));
+        const said = new Set();
+        const first = emit({ lead: '', noun: 'thing(s)', tail: '', rows }, said);
+        first.keys.forEach((k) => said.add(k));
+        const rest = emit({ lead: '', noun: 'thing(s)', tail: '', rows }, said);
+        return (
+          first.keys.length === MAX_FINDINGS &&
+          first.text.endsWith('(2 further thing(s) not shown.)') &&
+          rest.keys.length === 2 &&
+          rest.text === `- k${MAX_FINDINGS}\n- k${MAX_FINDINGS + 1}`
+        );
+      })(),
+    ],
+    [
       'the session gate admits what was written after the session opened, and nothing older',
       (() => {
         const stamp = (name, ms) => {
@@ -196,15 +287,21 @@ if (process.argv[2] === '--self-test') {
   process.exit(fail ? 1 : 0);
 }
 
-const capped = (rows, render, noun) => {
+function emit(part, said) {
+  const rows = part.rows.filter((r) => !said.has(r.key));
+  if (!rows.length) return null;
   const shown = rows.slice(0, MAX_FINDINGS);
-  return (
-    shown.map(render).join('\n') +
-    (rows.length > shown.length
-      ? `\n(${rows.length - shown.length} further ${noun} not shown.)`
-      : '')
-  );
-};
+  return {
+    keys: shown.map((r) => r.key),
+    text:
+      part.lead +
+      shown.map((r) => r.text).join('\n') +
+      (rows.length > shown.length
+        ? `\n(${rows.length - shown.length} further ${part.noun} not shown.)`
+        : '') +
+      part.tail,
+  };
+}
 
 function sweptCss({ cwd, root, added }) {
   const byPath = new Map();
@@ -232,20 +329,38 @@ function sweptCss({ cwd, root, added }) {
     .sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
   if (!hits.length) return null;
 
-  return (
-    'css-pro swept the CSS this session changed. These are rules the per-edit check ' +
-    'refuses a write for; it did not see these, because they reached disk outside ' +
-    'Write/Edit or are only provable against the whole block:\n' +
-    capped(
-      hits,
-      (r) => `- ${relative(cwd, r.path).replace(/\\/g, '/')}:${r.line}  ${r.msg}`,
-      'finding(s)',
-    ) +
-    (unswept ? `\n(${unswept} further changed file(s) not swept.)` : '')
-  );
+  return {
+    lead:
+      'css-pro swept the CSS this session changed. These are rules the per-edit check ' +
+      'refuses a write for; it did not see these, because they reached disk outside ' +
+      'Write/Edit or are only provable against the whole block:\n',
+    noun: 'finding(s)',
+    tail: unswept ? `\n(${unswept} further changed file(s) not swept.)` : '',
+    rows: hits.map((r) => {
+      const at = `${relative(cwd, r.path).replace(/\\/g, '/')}:${r.line}`;
+      return { key: `${at}\t${r.msg}`, text: `- ${at}  ${r.msg}` };
+    }),
+  };
 }
 
-function undeclaredTokens({ cwd, root, git, added }) {
+function declaredNames(git, where, extraFlags) {
+  const out = git(
+    'grep',
+    '--untracked',
+    ...extraFlags,
+    '-hIoE',
+    '-e',
+    CUSTOM_PROPERTY_DECLARED,
+    '--',
+    ...AUDITABLE_GLOBS.map((g) => `:/${where}${g}`),
+  );
+  if (out === null) return null;
+  const names = new Set();
+  for (const m of out.matchAll(/--[A-Za-z0-9_-]+/g)) names.add(m[0]);
+  return names;
+}
+
+function undeclaredTokens({ cwd, root, git, added, said, settled }) {
   const used = new Map();
   const states = new Map();
   for (const a of added) {
@@ -257,32 +372,34 @@ function undeclaredTokens({ cwd, root, git, added }) {
       if (!used.has(m[1])) used.set(m[1], `${relative(cwd, resolve(root, a.file))}:${a.line}`);
   }
   if (!used.size) return null;
-  const declarations = git(
-    'grep',
-    '--untracked',
-    '-hIoE',
-    '-e',
-    CUSTOM_PROPERTY_DECLARED,
-    '--',
-    ...AUDITABLE_GLOBS.map((g) => `:/${g}`),
-  );
-  if (declarations === null) return null;
+  const declared = declaredNames(git, '', []);
+  if (declared === null) return null;
 
-  const declared = new Set();
-  for (const m of declarations.matchAll(/--[A-Za-z0-9_-]+/g)) declared.add(m[0]);
-
-  const missing = [...used].filter(([name]) => !declared.has(name));
+  let missing = [...used].filter(([name]) => !declared.has(name) && !said.has(name));
   if (!missing.length) return null;
 
-  return (
-    'css-pro: these custom properties are read by a `var()` with no fallback, and ' +
-    'nothing in this repository declares them. An undeclared name makes the ' +
-    'declaration invalid at computed-value time, so the property falls back to its ' +
-    'inherited or initial value with no error anywhere:\n' +
-    capped(missing, ([name, where]) => `- ${where.replace(/\\/g, '/')}  ${name}`, 'name(s)') +
-    '\nCheck each name against the sheet that declares your tokens. If the value ' +
-    'is set from JavaScript at runtime, give the `var()` a fallback.'
-  );
+  const vendored = declaredNames(git, '*node_modules/', ['--no-exclude-standard']);
+  if (vendored === null) return null;
+
+  for (const [name] of missing) if (vendored.has(name)) settled.push(name);
+  missing = missing.filter(([name]) => !vendored.has(name));
+  if (!missing.length) return null;
+
+  return {
+    lead:
+      'css-pro: these custom properties are read by a `var()` with no fallback, and ' +
+      'nothing in this repository or its installed packages declares them. An undeclared ' +
+      'name makes the declaration invalid at computed-value time, so the property falls ' +
+      'back to its inherited or initial value with no error anywhere:\n',
+    noun: 'name(s)',
+    tail:
+      '\nCheck each name against the sheet that declares your tokens. If the value ' +
+      'is set from JavaScript at runtime, give the `var()` a fallback.',
+    rows: missing.map(([name, where]) => ({
+      key: name,
+      text: `- ${where.replace(/\\/g, '/')}  ${name}`,
+    })),
+  };
 }
 
 try {
@@ -310,6 +427,14 @@ try {
   const root = git('rev-parse', '--show-toplevel')?.trim();
   if (!root) process.exit(0);
 
+  const stamp = stateFile('sweep', { session_id: payload.session_id });
+  let said = new Set();
+  try {
+    said = new Set(readFileSync(stamp, 'utf8').split('\n'));
+  } catch {}
+
+  const settled = [];
+
   const baseline = new Set(before);
   const touched = sessionGate(root, startedAt);
   const untracked = (git('ls-files', '-o', '--exclude-standard', '--full-name', '--', ':/') ?? '')
@@ -319,6 +444,8 @@ try {
     cwd,
     root,
     git,
+    said,
+    settled,
     added: [
       ...addedLines(git(...DIFF_ARGS, 'HEAD') ?? git(...DIFF_ARGS) ?? ''),
       ...untrackedLines(root, untracked),
@@ -328,38 +455,34 @@ try {
   };
 
   const parts = [];
-  const broke = [];
+  const fresh = [];
   for (const check of [sweptCss, undeclaredTokens]) {
     try {
       const part = check(shared);
-      if (part) parts.push(part);
-    } catch (e) {
-      broke.push(`${check.name} (${String(e?.message ?? e).split('\n')[0]})`);
+      const next = part && emit(part, said);
+      if (!next) continue;
+      fresh.push(...next.keys);
+      parts.push(next.text);
+    } catch {
+      // Ignore a check that fails, so the other can still run. The sweep hook is advisory, not a gate.
     }
   }
-
-  const out = {};
-  if (broke.length) out.systemMessage = `css-pro: turn-end check skipped — ${broke.join(', ')}`;
-
-  const body = parts.join('\n\n');
-  if (body) {
-    const stamp = stateFile('sweep', payload);
-    let last = '';
+  const record = [...settled, ...fresh];
+  if (record.length) {
     try {
-      last = readFileSync(stamp, 'utf8');
+      appendFileSync(stamp, record.join('\n') + '\n');
     } catch {}
-    if (last !== body) {
-      try {
-        writeFileSync(stamp, body);
-      } catch {}
-      out.hookSpecificOutput = {
-        hookEventName: payload.hook_event_name || 'Stop',
-        additionalContext: body,
-      };
-    }
   }
+  if (!parts.length) process.exit(0);
 
-  if (out.systemMessage || out.hookSpecificOutput) process.stdout.write(JSON.stringify(out));
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: payload.hook_event_name || 'Stop',
+        additionalContext: parts.join('\n\n'),
+      },
+    }),
+  );
 } catch {
   process.exit(0);
 }

@@ -33,9 +33,11 @@ you as something the agent did. A finding is reported once, not once per turn.
 file, so none of them can tell a real token from a typo — `var(--colour-brand)` looks the
 same as `var(--color-brand)` in the sheet that uses it. At turn end the names read by a
 `var()` with no fallback on a changed line are matched against every custom property
-declared anywhere in the repo, including ones set from JavaScript; what nothing declares
-is named. A `var()` that carries a fallback renders correctly either way and stays
-silent. The session-start reminder also names the sheets your tokens actually live in.
+declared anywhere in the repo, including ones set from JavaScript, and against the ones
+your installed packages declare — a Bootstrap or MUI token is declared, it just lives
+somewhere git ignores. What nothing declares is named. A `var()` that carries a fallback
+renders correctly either way and stays silent. The session-start reminder also names the
+sheets your tokens actually live in.
 
 **The subagent hears its own defects.** The turn-end sweep also runs when a subagent
 finishes, so CSS it wrote through a shell comes back while it can still fix it, rather
