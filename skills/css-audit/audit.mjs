@@ -206,7 +206,7 @@ export function auditPrepare(raw, filePath) {
   return prepare(raw, filePath);
 }
 
-function auditFile(filePath) {
+export function auditFile(filePath) {
   let raw;
   try {
     raw = fs.readFileSync(filePath, 'utf8');

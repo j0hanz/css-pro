@@ -1,19 +1,18 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { fileURLToPath } from 'node:url';
+import { auditFile } from '../skills/css-audit/audit.mjs';
 import {
-  addedLines,
   AUDITABLE,
   AUDITABLE_GLOBS,
   cap,
-  DIFF_ARGS,
   lineKey,
   MAX_FILES,
+  parseSessionMark,
+  repoChanges,
   stateFile,
-  untrackedLines,
 } from './changed.mjs';
 import { CUSTOM_PROPERTY_DECLARED } from './rules.mjs';
 import { blankStrings, LINE_COMMENT_LANGS, stripComments } from './strip.mjs';
@@ -21,8 +20,6 @@ import { blankStrings, LINE_COMMENT_LANGS, stripComments } from './strip.mjs';
 const MAX_FINDINGS = 5;
 
 export const NO_FALLBACK = /var\(\s*(--[\w-]+)\s*\)/g;
-
-const AUDIT = fileURLToPath(new URL('../skills/css-audit/audit.mjs', import.meta.url));
 
 export function maskByFile(added) {
   const byFile = new Map();
@@ -67,14 +64,15 @@ function missedBlockRules({ cwd, root, added, said }) {
   const swept = [...byPath.keys()].slice(0, MAX_FILES);
   const unswept = byPath.size - swept.length;
 
-  const audit = spawnSync(process.execPath, [AUDIT, '--json', ...swept], {
-    encoding: 'utf8',
-    cwd,
-    windowsHide: true,
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  const rows = JSON.parse(audit.stdout)
-    .filter((r) => r.severity === 'block' && r.line != null && byPath.get(r.path)?.has(r.line))
+  const rows = swept
+    .flatMap((p) => {
+      const r = auditFile(p);
+      return r.error
+        ? []
+        : r.block
+            .filter((f) => !r.ignore.has(f.line) && byPath.get(p).has(f.line))
+            .map((f) => ({ ...f, path: p }));
+    })
     .sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line)
     .map((r) => {
       const where = `${relative(cwd, r.path).replace(/\\/g, '/')}:${r.line}`;
@@ -163,23 +161,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     let startedAt = NaN;
     let before = [];
     try {
-      const mark = readFileSync(stateFile('session', { session_id: payload.session_id }), 'utf8');
-      const newline = mark.indexOf('\n');
-      startedAt = Number(newline === -1 ? mark : mark.slice(0, newline));
-      before = newline === -1 ? [] : mark.slice(newline + 1).split('\n');
+      ({ startedAt, before } = parseSessionMark(
+        readFileSync(stateFile('session', { session_id: payload.session_id }), 'utf8'),
+      ));
     } catch {}
     if (!(startedAt > 0)) process.exit(0);
 
     const cwd = payload.cwd || process.cwd();
-    const git = (...args) => {
-      const r = spawnSync('git', ['-C', cwd, ...args], {
-        encoding: 'utf8',
-        windowsHide: true,
-        maxBuffer: 16 * 1024 * 1024,
-      });
-      return r.status === 0 || (args[0] === 'grep' && r.status === 1) ? r.stdout : null;
-    };
-    const root = git('rev-parse', '--show-toplevel')?.trim();
+    const { root, git, added } = repoChanges(cwd);
     if (!root) process.exit(0);
 
     const ledger = stateFile('sweep', { session_id: payload.session_id });
@@ -190,18 +179,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
     const baseline = new Set(before);
     const touched = sessionGate(root, startedAt);
-    const untracked = (git('ls-files', '-o', '--exclude-standard', '--full-name', '--', ':/') ?? '')
-      .split('\n')
-      .filter((p) => p && AUDITABLE.test(p) && touched(p));
     const scan = {
       cwd,
       root,
       git,
       said,
-      added: [
-        ...addedLines(git(...DIFF_ARGS, 'HEAD') ?? git(...DIFF_ARGS) ?? ''),
-        ...untrackedLines(root, untracked),
-      ]
+      added: added
         .filter((a) => AUDITABLE.test(a.file) && touched(a.file))
         .map((a) => ({ ...a, fresh: !baseline.has(lineKey(a)) })),
     };
