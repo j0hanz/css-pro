@@ -20,8 +20,8 @@ export const MAX_FILES = 40;
 
 const slug = (v) => String(v ?? 'main').replace(/[^\w-]/g, '_');
 
-export const stateFile = (kind, { session_id, agent_id } = {}) =>
-  join(tmpdir(), `css-pro-${kind}-${slug(session_id)}${agent_id ? `-${slug(agent_id)}` : ''}.txt`);
+export const stateFile = (kind, { session_id } = {}) =>
+  join(tmpdir(), `css-pro-${kind}-${slug(session_id)}.txt`);
 
 // The session mark is compared against file mtimes, which can lag the wall clock.
 const MTIME_SLACK_MS = 1000;
@@ -48,9 +48,26 @@ export function cap(rows, limit, noun) {
   return { shown, note: rest ? `\n(${rest} further ${noun} not shown.)` : '' };
 }
 
+const mtimeOf = (abs) => {
+  try {
+    return statSync(abs).mtimeMs;
+  } catch {
+    return 0;
+  }
+};
+
+export function keepNewest(root, paths) {
+  if (paths.length <= MAX_FILES) return { kept: paths, dropped: [] };
+  const ranked = paths
+    .map((file) => ({ file, at: mtimeOf(resolve(root, file)) }))
+    .sort((a, b) => b.at - a.at)
+    .map((p) => p.file);
+  return { kept: ranked.slice(0, MAX_FILES), dropped: ranked.slice(MAX_FILES) };
+}
+
 export function untrackedLines(root, paths) {
   const out = [];
-  for (const file of paths.slice(0, MAX_FILES)) {
+  for (const file of paths) {
     const abs = resolve(root, file);
     try {
       if (statSync(abs).size > MAX_BYTES) continue;
@@ -103,12 +120,14 @@ export function repoChanges(cwd) {
   const untracked = (git('ls-files', '-o', '--exclude-standard', '--full-name', '--', ':/') ?? '')
     .split('\n')
     .filter((p) => p && AUDITABLE.test(p));
+  const { kept, dropped } = keepNewest(root, untracked);
   return {
     root,
     git,
+    dropped,
     added: [
       ...addedLines(git(...DIFF_ARGS, 'HEAD') ?? git(...DIFF_ARGS) ?? ''),
-      ...untrackedLines(root, untracked),
+      ...untrackedLines(root, kept),
     ],
   };
 }

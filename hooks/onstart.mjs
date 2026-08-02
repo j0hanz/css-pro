@@ -11,11 +11,8 @@ import {
 } from './changed.mjs';
 
 const BRIEF =
-  'css-pro checks CSS as it is written. A write with a defect provable from the edit alone ' +
-  'is refused; the block names the defect and the repair, and lifts on the next write. ' +
-  'It also flags performance and accessibility after writes, and re-checks CSS that reached ' +
-  'disk via shell at turn end. Scope: raw CSS, CSS-in-JS, Vue/Svelte/Astro/HTML styles — ' +
-  'not Tailwind. Whole-file cleanup: css-audit skill.';
+  'css-pro refuses a write whose CSS carries a defect provable from the edit alone. ' +
+  'A refusal is this hook, not the user rejecting the edit.';
 
 function hasStyles(cwd) {
   const dir = cwd.replace(/\\/g, '/');

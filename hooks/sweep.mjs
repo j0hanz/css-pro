@@ -51,7 +51,7 @@ export function sessionGate(root, startedAt) {
   };
 }
 
-function missedBlockRules({ cwd, root, added, said }) {
+function missedBlockRules({ cwd, root, added, said, dropped }) {
   const byPath = new Map();
   for (const a of added) {
     if (!a.fresh) continue;
@@ -62,7 +62,7 @@ function missedBlockRules({ cwd, root, added, said }) {
   if (!byPath.size) return null;
 
   const swept = [...byPath.keys()].slice(0, MAX_FILES);
-  const unswept = byPath.size - swept.length;
+  const unswept = byPath.size - swept.length + dropped;
 
   const rows = swept
     .flatMap((p) => {
@@ -85,9 +85,7 @@ function missedBlockRules({ cwd, root, added, said }) {
   return {
     keys: shown.map((r) => r.key),
     text:
-      'css-pro swept the CSS this session changed. These are rules the per-edit check ' +
-      'refuses a write for; it did not see these, because they reached disk outside ' +
-      'Write/Edit or are only provable against the whole block:\n' +
+      'css-pro, turn-end sweep — these trip write-refusal rules:\n' +
       shown.map((r) => r.text).join('\n') +
       note +
       (unswept ? `\n(${unswept} further changed file(s) not swept.)` : ''),
@@ -143,14 +141,11 @@ export function undeclaredTokens({ cwd, root, git, added, said }) {
   return {
     keys: [...settled, ...shown.map((r) => r.key)],
     text:
-      'css-pro: these custom properties are read by a `var()` with no fallback, and ' +
-      'nothing in this repository or its installed packages declares them. An undeclared ' +
-      'name makes the declaration invalid at computed-value time, so the property falls ' +
-      'back to its inherited or initial value with no error anywhere:\n' +
+      'css-pro: read by a `var()` with no fallback, declared nowhere in this repo or its ' +
+      'installed packages — the declaration is invalid and silently falls back:\n' +
       shown.map((r) => r.text).join('\n') +
       note +
-      '\nCheck each name against the sheet that declares your tokens. If the value ' +
-      'is set from JavaScript at runtime, give the `var()` a fallback.',
+      '\nIf the value is set from JavaScript at runtime, give the `var()` a fallback.',
   };
 }
 
@@ -168,7 +163,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (!(startedAt > 0)) process.exit(0);
 
     const cwd = payload.cwd || process.cwd();
-    const { root, git, added } = repoChanges(cwd);
+    const { root, git, added, dropped } = repoChanges(cwd);
     if (!root) process.exit(0);
 
     const ledger = stateFile('sweep', { session_id: payload.session_id });
@@ -184,6 +179,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       root,
       git,
       said,
+      dropped: dropped.filter((f) => AUDITABLE.test(f) && touched(f)).length,
       added: added
         .filter((a) => AUDITABLE.test(a.file) && touched(a.file))
         .map((a) => ({ ...a, fresh: !baseline.has(lineKey(a)) })),

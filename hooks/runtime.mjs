@@ -11,8 +11,6 @@ const ADVISORY_CAP = 3;
 function addedText({ tool_name, tool_input = {} }) {
   if (tool_name === 'Write') return tool_input.content ?? '';
   if (tool_name === 'Edit') return tool_input.new_string ?? '';
-  if (tool_name === 'MultiEdit')
-    return (tool_input.edits ?? []).map((e) => e.new_string ?? '').join('\n');
   return '';
 }
 
@@ -31,8 +29,18 @@ function remember(ledger, keys) {
   } catch {}
 }
 
+const site = (text, at) =>
+  text
+    .slice(at, at + 60)
+    .split(/[\n;{}]/)[0]
+    .replace(/\s+/g, ' ')
+    .trim();
+
 const firedMessages = (rules, text, path, readFile) =>
-  runRules(rules, text, path, readFile).map((h) => h.msg);
+  runRules(rules, text, path, readFile).map((h) => {
+    const where = site(text, h.at[0]);
+    return where ? `${h.msg}  [${where}]` : h.msg;
+  });
 
 try {
   const payload = JSON.parse((await text(process.stdin)) || '{}');
@@ -99,7 +107,7 @@ try {
     );
     if (advisories.length) {
       const { shown, note } = cap(advisories, ADVISORY_CAP, 'finding(s)');
-      remember(ledger, shown.map(key));
+      remember(ledger, advisories.map(key));
       process.stdout.write(
         JSON.stringify({
           hookSpecificOutput: {

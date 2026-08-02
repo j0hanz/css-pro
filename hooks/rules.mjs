@@ -288,7 +288,7 @@ function focusableMissingFocusVisible(added, readFile) {
       /(?<![\w-])cursor\s*:\s*pointer/i.test(rule.body) &&
       !splitSelectorList(rule.selector).some((part) => focused.has(baseOfSelector(part)))
     )
-      at.push(bodyOffset(rule, 0));
+      at.push(rule.at);
   return at.sort((a, b) => a - b);
 }
 
