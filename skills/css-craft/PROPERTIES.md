@@ -120,8 +120,6 @@ Put layout math in once, against custom properties; in the media query, re-point
 }
 ```
 
-`calc()` compose them freely; media queries cannot _read_ `var()` but can freely _re-declare_.
-
 ### Fluid values — clamp the value, skip the query
 
 Recipes for values adapting on their own; prefer these before re-pointing in any query:

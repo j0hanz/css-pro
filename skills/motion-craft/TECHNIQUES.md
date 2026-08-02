@@ -1,6 +1,6 @@
 # Motion techniques — long-tail reference
 
-Open when build task go past component essentials in `SKILL.md`: clip-path animation, gestures & drag, perf gotchas, stagger/cohesion/asymmetric timing, `@starting-style` entry, blur masking, tooltips, reduced motion in JS, debugging. Agent building one animation no need load whole file — read only section build touch. Samples below show the motion only; the `@media (prefers-reduced-motion: reduce)` branch `SKILL.md` "Done when" requires ships with every one (stagger sample carries it, as the pattern to copy).
+Open when build task go past component essentials in `SKILL.md` — its pointer block maps task to section. Agent building one animation no need load whole file — read only section build touch. Samples below show the motion only; the `@media (prefers-reduced-motion: reduce)` branch `SKILL.md` "Done when" requires ships with every one (stagger sample carries it, as the pattern to copy).
 
 ## CSS transforms & clip-path
 

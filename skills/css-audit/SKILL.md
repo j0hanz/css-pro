@@ -1,6 +1,6 @@
 ---
 name: css-audit
-description: Audit whole files for CSS defects — stylesheets, CSS-in-JS, and Vue/Svelte/Astro/HTML styles — or review a CSS or motion diff. Cleaning up legacy CSS, inheriting a sheet, checking the styles in a PR. Not the mechanics — css-craft owns CSS mechanics, motion-craft owns motion decisions.
+description: Audit whole CSS files for defects — stylesheets, CSS-in-JS, Vue/Svelte/Astro/HTML component styles — or review a CSS or motion diff. Not mechanics — css-craft; not motion decisions — motion-craft.
 ---
 
 # CSS Audit
@@ -48,8 +48,6 @@ A finding inside object-form CSS-in-JS — a `style={{ }}`, `sx`, or `styled.div
 
 - _Repeated declarations_ — two different selectors carrying the same declarations, in any order, under the same at-rule conditions. Merging them into one selector list, or onto a shared class, changes nothing a browser can observe. Fewer than two shared declarations is not reported.
 - _Overlapping declarations_ — the same, one declaration short of identical: a block copied from another and then drifted. Reported when the shared set is at least four declarations _and_ most of both blocks, so a long rule that merely agrees on some `font-*` lines does not fire.
-- _Redeclares an earlier block_ — the shared set is the earlier block in full, so the re-assertion is likely dead: this selector may already inherit that rule. Fewer than five shared declarations stays an _Overlapping_ finding; a four-declaration reset fully inside a longer rule is usually a shared base, not a copied component.
-- _Mixes direction conventions_ — a note, not a finding, and it lists lines. Block-axis properties (`margin-top`, `bottom`) are not counted — they mean the same thing in every writing mode. Which convention the project wants is its own call. Nothing to dispose.
 - _Unused / undefined custom property_ — with the run scoped wide enough (above), a remaining one is dead or a typo (`--color-primayr`). Confirm before deleting.
 
 ## Review — a diff
