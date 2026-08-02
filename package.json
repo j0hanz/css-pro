@@ -4,10 +4,11 @@
   "private": true,
   "description": "Claude Code plugin that stops agents wrecking your CSS.",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test": "node --test"
   },
   "devDependencies": {
     "prettier": "^3.8.4"

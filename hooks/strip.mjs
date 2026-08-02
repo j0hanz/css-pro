@@ -1,32 +1,31 @@
 const blank = (s) => s.replace(/[^\n]/g, ' ');
 
-const LINE_COMMENT_LANGS = /\.(scss|sass|less|[cm]?[jt]sx?)$/i;
+export const LINE_COMMENT_LANGS = /\.(scss|sass|less|[cm]?[jt]sx?)$/i;
 export const MARKUP_LANGS = /\.(html?|astro|vue|svelte)$/i;
 const HOST_CODE = /\.[cm]?[jt]sx?$/i;
 const STYLE_LANG = /\blang\s*=\s*["']?(?:scss|sass|less)/i;
 export const MARKUP_ANCHOR = /<\/?(?:style|script)\b|\bstyle\s*=\s*["']|^---\r?$/im;
-
-export function prepare(text, filePath = '', sink) {
-  if (MARKUP_LANGS.test(filePath) && MARKUP_ANCHOR.test(text)) return prepareMarkup(text, sink);
+export function prepare(text, filePath = '') {
+  if (MARKUP_LANGS.test(filePath) && MARKUP_ANCHOR.test(text)) return prepareMarkup(text);
   return prepareCode(
     stripComments(text, LINE_COMMENT_LANGS.test(filePath)),
     HOST_CODE.test(filePath),
-    sink,
   );
 }
 
-function appendBlocks(head, blocks, sink) {
-  let out = head;
-  for (const b of blocks) {
-    sink?.push({ at: out.length + 1, source: b.source });
-    out += `\n${b.text}`;
+function appendBlocks(head, extra) {
+  const blocks = [];
+  let text = head;
+  for (const b of extra) {
+    blocks.push({ at: text.length + 1, source: b.source });
+    text += `\n${b.text}`;
   }
-  return out;
+  return { text, blocks };
 }
 
 const contentStart = (m, body, closeLen) => m.index + m[0].length - body.length - closeLen;
 
-function prepareMarkup(text, sink) {
+function prepareMarkup(text) {
   const src = text.replace(/<!--[\s\S]*?-->/g, blank);
   const regions = [];
   const extra = [];
@@ -63,12 +62,12 @@ function prepareMarkup(text, sink) {
   }
   out += blank(src.slice(at));
   extra.sort((a, b) => a.source - b.source);
-  return appendBlocks(out, extra, sink);
+  return appendBlocks(out, extra);
 }
 
-function prepareCode(code, hostCode, sink) {
-  const blocks = styleObjectBlocks(code).map((b) => ({ text: b.text, source: b.at }));
-  return appendBlocks(blankStrings(hostCode ? keepTemplates(code) : code), blocks, sink);
+function prepareCode(code, hostCode) {
+  const extra = styleObjectBlocks(code).map((b) => ({ text: b.text, source: b.at }));
+  return appendBlocks(blankStrings(hostCode ? keepTemplates(code) : code), extra);
 }
 
 function keepTemplates(code) {
@@ -114,7 +113,9 @@ function closingBrace(text, from) {
   return text.length;
 }
 
-function stripComments(text, lineComments) {
+// Both scanners below preserve length: every byte they neutralise is replaced by a
+// space, and newlines survive. Callers rely on that to keep offsets and line counts.
+export function stripComments(text, lineComments) {
   let out = '';
   let i = 0;
   while (i < text.length) {
@@ -160,7 +161,7 @@ function stripComments(text, lineComments) {
   return out;
 }
 
-function blankStrings(text) {
+export function blankStrings(text) {
   let out = '';
   let i = 0;
   while (i < text.length) {

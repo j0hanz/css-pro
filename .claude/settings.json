@@ -8,7 +8,7 @@
             "type": "command",
             "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/selftest.mjs\"",
             "timeout": 30,
-            "statusMessage": "css-pro: running the rule-table self-test..."
+            "statusMessage": "css-pro: running the test suite..."
           }
         ]
       }

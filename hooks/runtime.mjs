@@ -1,16 +1,12 @@
 #!/usr/bin/env node
 import { appendFileSync, readFileSync, statSync } from 'node:fs';
 import { text } from 'node:stream/consumers';
+import { AUDITABLE, cap, MAX_BYTES, stateFile, STYLESHEET } from './changed.mjs';
 import { prepare } from './strip.mjs';
-import { BLOCK, ADVISE, STYLE_MARKERS, DECLARATION } from './rules.mjs';
-import { stateFile } from './state.mjs';
+import { ADVISE, BLOCK, DECLARATION, runRules, STYLE_MARKERS } from './rules.mjs';
 
 const MODE = process.argv[2];
 const ADVISORY_CAP = 3;
-const MAX_BASELINE_BYTES = 512 * 1024;
-
-const STYLESHEET = /\.(css|scss|sass|less)$/i;
-const HOST = /\.([cm]?[jt]sx?|vue|svelte|astro|html?)$/i;
 
 function addedText({ tool_name, tool_input = {} }) {
   if (tool_name === 'Write') return tool_input.content ?? '';
@@ -35,45 +31,26 @@ function remember(ledger, keys) {
   } catch {}
 }
 
-function run(rules, added, readFile, path) {
-  const hits = [];
-  for (const rule of rules) {
-    if (rule.files && !rule.files.test(path)) continue;
-    if (rule.fn) {
-      if (rule.fn(added, readFile)) hits.push(rule.msg);
-      continue;
-    }
-    if (rule.re) {
-      if (rule.re.test(added)) hits.push(rule.msg);
-      continue;
-    }
-    if (!rule.when.every((w) => w.test(added))) continue;
-    const file = readFile();
-    if (file === null || rule.absent.test(file)) continue;
-    hits.push(rule.msg);
-  }
-  return hits;
-}
+const fired = (rules, added, readFile, path) =>
+  runRules(rules, added, path, readFile).map((h) => h.msg);
 
 try {
   const payload = JSON.parse((await text(process.stdin)) || '{}');
   const path = payload.tool_input?.file_path;
-  if (!path) process.exit(0);
+  if (!path || !AUDITABLE.test(path)) process.exit(0);
 
   const isSheet = STYLESHEET.test(path);
-  if (!isSheet && !HOST.test(path)) process.exit(0);
-
   const raw = addedText(payload);
   if (!raw) process.exit(0);
   if (!isSheet && !STYLE_MARKERS.test(raw) && !DECLARATION.test(raw)) process.exit(0);
 
-  const added = prepare(raw, path);
+  const added = prepare(raw, path).text;
 
   let cached;
   const readFile = () => {
     if (cached === undefined) {
       try {
-        cached = prepare(readFileSync(path, 'utf8'), path);
+        cached = prepare(readFileSync(path, 'utf8'), path).text;
       } catch {
         cached = null;
       }
@@ -87,15 +64,15 @@ try {
   if (MODE === 'pre') {
     if (!recalled(ledger).has(key(''))) {
       try {
-        if (statSync(path).size <= MAX_BASELINE_BYTES) {
+        if (statSync(path).size <= MAX_BYTES) {
           const before = readFile();
-          if (before !== null) remember(ledger, run(ADVISE, before, readFile, path).map(key));
+          if (before !== null) remember(ledger, fired(ADVISE, before, readFile, path).map(key));
         }
       } catch {}
       remember(ledger, [key('')]);
     }
 
-    const blocks = run(BLOCK, added, () => null, path);
+    const blocks = fired(BLOCK, added, () => null, path);
     if (blocks.length) {
       process.stdout.write(
         JSON.stringify({
@@ -112,19 +89,16 @@ try {
     }
   } else if (MODE === 'post') {
     const said = recalled(ledger);
-    const advisories = run(ADVISE, added, readFile, path).filter((m) => !said.has(key(m)));
+    const advisories = fired(ADVISE, added, readFile, path).filter((m) => !said.has(key(m)));
     if (advisories.length) {
-      const shown = advisories.slice(0, ADVISORY_CAP);
-      const withheld = advisories.length - shown.length;
+      const { shown, note } = cap(advisories, ADVISORY_CAP, 'finding(s)');
       remember(ledger, shown.map(key));
       process.stdout.write(
         JSON.stringify({
           hookSpecificOutput: {
             hookEventName: 'PostToolUse',
             additionalContext:
-              `css-pro on ${path}:\n` +
-              shown.map((m) => `- ${m}`).join('\n') +
-              (withheld ? `\n(${withheld} further finding(s) not shown.)` : ''),
+              `css-pro on ${path}:\n` + shown.map((m) => `- ${m}`).join('\n') + note,
           },
         }),
       );

@@ -109,35 +109,101 @@ export const ADVISE = [
   },
 ];
 
-const BLOCK_RE = /(?<=^|[;{}])([^{};]+)\{([^{}]*)\}/g;
-
-const bodyStartOf = (m) => m.index + m[0].length - 1 - m[2].length;
-
-function* eachBlock(text) {
-  for (let t = text; ;) {
-    const layer = [...t.matchAll(BLOCK_RE)];
-    if (!layer.length) return;
-    yield* layer;
-    t = t.replace(BLOCK_RE, (m) => m.replace(/[^\n]/g, ' '));
+export function parseRules(text) {
+  const out = [];
+  let i = 0;
+  function block(prefix, atRules) {
+    const start = i;
+    while (i < text.length && text[i] !== '{' && text[i] !== '}') i++;
+    if (i >= text.length || text[i] === '}') {
+      if (text[i] === '}') i++;
+      return;
+    }
+    const raw = text.slice(start, i);
+    const stmt = raw.lastIndexOf(';') + 1;
+    const tail = raw.slice(stmt);
+    const head = tail.trim();
+    const at = start + stmt + tail.match(/^\s*/)[0].length;
+    const sel = prefix ? (head ? `${prefix} ${head}` : prefix) : head;
+    const cond = head.startsWith('@') ? (atRules ? `${atRules} ${head}` : head) : atRules;
+    i++;
+    const segs = [];
+    let hasNested = false;
+    while (i < text.length && text[i] !== '}') {
+      let j = i;
+      while (j < text.length && text[j] !== '{' && text[j] !== '}') j++;
+      if (j >= text.length || text[j] === '}') {
+        segs.push({ at: i, text: text.slice(i, j) });
+        i = j;
+        break;
+      }
+      hasNested = true;
+      const seg = text.slice(i, j);
+      const semi = seg.lastIndexOf(';');
+      if (semi >= 0) segs.push({ at: i, text: seg.slice(0, semi + 1) });
+      const nestedSel = (semi >= 0 ? seg.slice(semi + 1) : seg).trim();
+      i = j;
+      const nestedAt = nestedSel.startsWith('@');
+      block(
+        nestedAt || !nestedSel ? sel : `${sel} ${nestedSel}`,
+        nestedAt ? (cond ? `${cond} ${nestedSel}` : nestedSel) : cond,
+      );
+    }
+    const body = segs.map((s) => s.text).join('');
+    if (hasNested ? body.replace(/[;\s]/g, '') !== '' : true)
+      out.push({ selector: sel, context: cond ?? '', body, segs, at, line: 0 });
+    if (text[i] === '}') i++;
   }
+  while (i < text.length) block('', '');
+  return out;
 }
 
-const found = (at) => (at.length ? at : null);
+export function bodyOffset(rule, k) {
+  for (const s of rule.segs) {
+    if (k < s.text.length) return s.at + k;
+    k -= s.text.length;
+  }
+  return rule.at;
+}
+
+const globalize = (re) => new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+
+export function runRules(rules, text, path, readFile = () => text) {
+  const out = [];
+  for (const rule of rules) {
+    if (rule.files && !rule.files.test(path)) continue;
+    if (rule.fn) {
+      const at = rule.fn(text, readFile);
+      if (at.length) out.push({ msg: rule.msg, at });
+      continue;
+    }
+    if (rule.re) {
+      const at = [...text.matchAll(globalize(rule.re))].map((m) => m.index);
+      if (at.length) out.push({ msg: rule.msg, at });
+      continue;
+    }
+    if (!rule.when.every((w) => w.test(text))) continue;
+    const file = readFile();
+    if (file === null || rule.absent.test(file)) continue;
+    out.push({ msg: rule.msg, at: [globalize(rule.when[0]).exec(text).index] });
+  }
+  return out;
+}
 
 const MATH_NO_SPACE =
   /(?<!Math\.)\b(?:calc|clamp|min|max)\([^;{})]*?(?:[\w%] ?[+-][\d.(]|\) ?[+-][\d.(]|[%\d][+-] )/gi;
 const blankCustomIdents = (s) => s.replace(/--[\w-]+/g, (m) => '_'.repeat(m.length));
 
 function mathWhitespace(added) {
-  return found([...blankCustomIdents(added).matchAll(MATH_NO_SPACE)].map((m) => m.index));
+  return [...blankCustomIdents(added).matchAll(MATH_NO_SPACE)].map((m) => m.index);
 }
 
 function duplicateIdenticalDeclarations(added) {
   const at = [];
-  for (const m of eachBlock(added)) {
+  for (const rule of parseRules(added)) {
     const seen = new Map();
-    let offset = bodyStartOf(m);
-    for (const decl of m[2].split(';')) {
+    let k = 0;
+    for (const decl of rule.body.split(';')) {
       const idx = decl.indexOf(':');
       const prop = idx === -1 ? '' : decl.slice(0, idx).trim().toLowerCase();
       if (prop && !prop.startsWith('--')) {
@@ -145,13 +211,13 @@ function duplicateIdenticalDeclarations(added) {
           .slice(idx + 1)
           .trim()
           .toLowerCase();
-        if (seen.get(prop) === value) at.push(offset + decl.search(/\S/));
+        if (seen.get(prop) === value) at.push(bodyOffset(rule, k + decl.search(/\S/)));
         seen.set(prop, value);
       }
-      offset += decl.length + 1;
+      k += decl.length + 1;
     }
   }
-  return found(at.sort((a, b) => a - b));
+  return at.sort((a, b) => a - b);
 }
 
 const REORDER = [
@@ -164,7 +230,7 @@ const REORDER = [
 function visualReorder(added) {
   const at = [];
   for (const re of REORDER) for (const m of added.matchAll(re)) at.push(m.index);
-  return found(at.sort((a, b) => a - b));
+  return at.sort((a, b) => a - b);
 }
 
 const INLINE_LOGICAL = /(?<![\w-])(?:border|padding|margin|inset)-inline(?:-(?:start|end))?\s*:/i;
@@ -181,12 +247,12 @@ function flipsInRtl(value) {
 
 function directionBlindRadius(added) {
   const at = [];
-  for (const m of eachBlock(added)) {
-    if (!INLINE_LOGICAL.test(m[2])) continue;
-    const r = RADIUS.exec(m[2]);
-    if (r && flipsInRtl(r[1])) at.push(bodyStartOf(m) + r.index);
+  for (const rule of parseRules(added)) {
+    if (!INLINE_LOGICAL.test(rule.body)) continue;
+    const r = RADIUS.exec(rule.body);
+    if (r && flipsInRtl(r[1])) at.push(bodyOffset(rule, r.index));
   }
-  return found(at.sort((a, b) => a - b));
+  return at.sort((a, b) => a - b);
 }
 
 function splitTopLevel(s, stop) {
@@ -209,21 +275,21 @@ function splitTopLevel(s, stop) {
 const splitSelectorList = (s) => splitTopLevel(s, (c) => c === ',');
 
 function focusableMissingFocusVisible(added, readFile) {
-  if (!/:focus-visible/i.test(added)) return null;
+  if (!/:focus-visible/i.test(added)) return [];
   const scope = readFile?.() ?? added;
   const focused = new Set();
-  for (const m of eachBlock(scope))
-    if (m[1].includes(':focus-visible'))
-      for (const part of splitSelectorList(m[1])) focused.add(baseOfSelector(part));
-  if (focused.has('*')) return null;
+  for (const rule of parseRules(scope))
+    if (rule.selector.includes(':focus-visible'))
+      for (const part of splitSelectorList(rule.selector)) focused.add(baseOfSelector(part));
+  if (focused.has('*')) return [];
   const at = [];
-  for (const m of eachBlock(added))
+  for (const rule of parseRules(added))
     if (
-      /(?<![\w-])cursor\s*:\s*pointer/i.test(m[2]) &&
-      !splitSelectorList(m[1]).some((part) => focused.has(baseOfSelector(part)))
+      /(?<![\w-])cursor\s*:\s*pointer/i.test(rule.body) &&
+      !splitSelectorList(rule.selector).some((part) => focused.has(baseOfSelector(part)))
     )
-      at.push(bodyStartOf(m));
-  return found(at.sort((a, b) => a - b));
+      at.push(bodyOffset(rule, 0));
+  return at.sort((a, b) => a - b);
 }
 
 function baseOfSelector(sel) {

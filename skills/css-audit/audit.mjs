@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { prepare, MARKUP_LANGS, MARKUP_ANCHOR } from '../../hooks/strip.mjs';
-import { BLOCK, ADVISE, STYLE_MARKERS, DECLARATION } from '../../hooks/rules.mjs';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
+import { AUDITABLE, STYLESHEET } from '../../hooks/changed.mjs';
+import {
+  LINE_COMMENT_LANGS,
+  MARKUP_ANCHOR,
+  MARKUP_LANGS,
+  prepare,
+  stripComments,
+} from '../../hooks/strip.mjs';
+import { ADVISE, BLOCK, parseRules, runRules } from '../../hooks/rules.mjs';
 
-const STYLESHEET = /\.(css|scss|sass|less)$/i;
-// Everything the per-edit hook engages on. The audit used to accept STYLESHEET only,
-// so `audit.mjs src/ --strict` on a React or Vue tree reported `0 file(s)` and exited
-// 0 — a CI gate that audited nothing and passed. `prepare()` has always read these.
-const AUDITABLE = /\.(css|scss|sass|less|[cm]?[jt]sx?|vue|svelte|astro|html?)$/i;
 const GLOB = /[*?[\]{}]/;
-// A pattern only if nothing on disk answers to that exact name. SvelteKit and Next.js
-// put `[slug]` in real directory names, and globSync reads brackets as a character
-// class — `app/[id]/x.css` matched nothing, so the file went unaudited and the run
-// failed on a glob that was never a glob.
 const isGlob = (a) => GLOB.test(a) && !fs.statSync(a, { throwIfNoEntry: false });
 const SASS_INDENTED = /\.sass$/i;
 
@@ -21,15 +21,11 @@ const USAGE = `css-pro audit — whole-file audit of stylesheets and the styles 
 
 usage:
   node audit.mjs <file|dir|glob>... [--strict] [--json]
-  node audit.mjs --list-rules
-  node audit.mjs --help | --self-test
+  node audit.mjs --help | -h
 
   --strict      gate ADVISE and WHOLE-FILE findings too (exit 1); BLOCK always gates
   --json        emit one flat JSON array: [{path,line,severity,msg}]
-  --list-rules  print the rule table, then exit
-  --help, -h    this message
-  --self-test   run the built-in self-test (also runs with no arguments)
-  <dir>         recurse (no Node 22 needed; globs do), skipping node_modules and dot-dirs
+  <dir>         recurse, skipping node_modules and dot-dirs
 
 Reads .css/.scss/.sass/.less, CSS-in-JS in .js/.jsx/.ts/.tsx (+ .mjs/.cjs/.mts/.cts),
 and <style>/<script>/style="" in .vue/.svelte/.astro/.html. WHOLE-FILE structure checks
@@ -41,135 +37,25 @@ Suppress a false positive: put /* csspro-ignore */ on the line above the finding
 
 Exit code: 0 clean, 1 if any gated finding remains or a file/glob failed.`;
 
-function makeLineLookup(text) {
-  const starts = [0];
-  for (let i = 0; i < text.length; i++) if (text[i] === '\n') starts.push(i + 1);
-  return (idx) => {
-    let lo = 0,
-      hi = starts.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (starts[mid] <= idx) lo = mid;
-      else hi = mid - 1;
-    }
-    return lo + 1;
-  };
+export const lineCounter = (text) => (idx) => text.slice(0, idx).split('\n').length;
+
+export function findings(rules, text, filePath, lineOf) {
+  return runRules(rules, text, filePath).flatMap((hit) =>
+    [...new Set(hit.at.map(lineOf))].map((line) => ({ line, msg: hit.msg })),
+  );
 }
 
-function runTable(rules, prepared, path, lineOf) {
-  const out = [];
-  for (const rule of rules) {
-    if (rule.files && !rule.files.test(path)) continue;
-    if (rule.fn) {
-      const at = rule.fn(prepared);
-      if (at) for (const line of new Set(at.map(lineOf))) out.push({ line, msg: rule.msg });
-      continue;
-    }
-    if (rule.re) {
-      const re = globalize(rule.re);
-      let m;
-      while ((m = re.exec(prepared)) !== null) {
-        out.push({ line: lineOf(m.index), msg: rule.msg });
-        if (m.index === re.lastIndex) re.lastIndex++;
-      }
-      continue;
-    }
-    if (!rule.when.every((w) => w.test(prepared))) continue;
-    if (rule.absent && rule.absent.test(prepared)) continue;
-    let line = null;
-    const m = globalize(rule.when[0]).exec(prepared);
-    if (m) line = lineOf(m.index);
-    out.push({ line, msg: rule.msg });
-  }
-  return out;
-}
-
-function globalize(re) {
-  return new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
-}
-
-// `prepare` blanks stylesheets in place, so offsets into `prepared` index `src` too.
-// That holds only while prepare preserves length — prepareCode appends synthetic
-// blocks for CSS-in-JS, so for non-CSS inputs the lengths diverge and slicing `src`
-// with `prepared` offsets would mis-restore. Degrade to no restoration (still safe:
-// strings stay blanked) rather than slice wrong bytes.
-function restoreStrings(prepared, src) {
-  if (prepared.length !== src.length) return prepared;
-  return prepared.replace(/(['"])[^'"\n]*\1/g, (m, q, off) => {
-    const inner = src.slice(off + 1, off + m.length - 1).replace(/[{};]/g, ' ');
-    return q + inner + q;
-  });
-}
-
-function parseRules(text, lineOf) {
-  const out = [];
-  let i = 0;
-  function block(prefix, atRules) {
-    const start = i;
-    while (i < text.length && text[i] !== '{' && text[i] !== '}') i++;
-    if (i >= text.length || text[i] === '}') {
-      if (text[i] === '}') i++;
-      return;
-    }
-    const raw = text.slice(start, i);
-    const stmt = raw.lastIndexOf(';') + 1;
-    const tail = raw.slice(stmt);
-    const head = tail.trim();
-    const lead = tail.match(/^\s*/)[0].length;
-    const line = lineOf(start + stmt + lead);
-    const sel = prefix ? (head ? `${prefix} ${head}` : prefix) : head;
-    const cond = head.startsWith('@') ? (atRules ? `${atRules} ${head}` : head) : atRules;
-    i++;
-    let body = '';
-    let hasNested = false;
-    while (i < text.length && text[i] !== '}') {
-      let j = i;
-      while (j < text.length && text[j] !== '{' && text[j] !== '}') j++;
-      if (j >= text.length || text[j] === '}') {
-        body += text.slice(i, j);
-        i = j;
-        break;
-      }
-      hasNested = true;
-      const seg = text.slice(i, j);
-      const semi = seg.lastIndexOf(';');
-      body += semi >= 0 ? seg.slice(0, semi + 1) : '';
-      const nestedSel = (semi >= 0 ? seg.slice(semi + 1) : seg).trim();
-      i = j;
-      // A nested at-rule is a condition, not a selector. Folded into the selector it
-      // left the context empty, so a block inside `@media` keyed identically to one
-      // outside it and the two read as repeated declarations.
-      const nestedAt = nestedSel.startsWith('@');
-      block(
-        nestedAt || !nestedSel ? sel : `${sel} ${nestedSel}`,
-        nestedAt ? (cond ? `${cond} ${nestedSel}` : nestedSel) : cond,
-      );
-    }
-    if (hasNested ? body.replace(/[;\s]/g, '') !== '' : true)
-      out.push({ selector: sel, context: cond ?? '', body, line });
-    if (text[i] === '}') i++;
-  }
-  while (i < text.length) block('', '');
-  return out;
+export function forStructure(raw, filePath) {
+  return stripComments(raw, LINE_COMMENT_LANGS.test(filePath)).replace(
+    /(['"])((?:[^'"\\\n]|\\.)*)\1/g,
+    (m, q, inner) => q + inner.replace(/[{};]/g, ' ') + q,
+  );
 }
 
 const MIN_REPEATED_DECLS = 2;
-// A partial overlap only earns a finding when it is big enough to lift out. Three
-// shared declarations is two type rules happening to agree; four is a copied component.
 const MIN_SHARED_DECLS = 4;
-// ...and when the shared set is most of both blocks. Count alone rewards long blocks
-// for agreeing on boilerplate — an 18-declaration rule sharing four `font-*` lines with
-// another is not a copy of it, and scoring on count reported two dozen such pairs.
 const MIN_OVERLAP_RATIO = 0.6;
-// Full containment: a block that re-asserts the ENTIRETY of an earlier block
-// (shared === the earlier block's count) is a wholesale copy, not boilerplate
-// agreement. Higher floor than MIN_SHARED_DECLS — a 4-decl block fully inside a
-// longer one is usually a shared reset (color/border/outline/z-index), not a
-// copied component; five is a named component being redeclared whole.
-const MIN_FULL_REDECL = 5;
 
-// The earlier rule this one most resembles, under the same conditions, scored as shared
-// over union. Ties go to the earliest line so the report is stable across runs.
 function nearestOverlap(byDecl, ctx, decls) {
   const counts = new Map();
   for (const d of decls)
@@ -184,15 +70,9 @@ function nearestOverlap(byDecl, ctx, decls) {
   return best;
 }
 
-function structureFindings(prepared, lineOf) {
-  const rules = parseRules(prepared, lineOf);
+export function structureFindings(text, lineOf) {
   const out = [];
-  // `context\0declaration` -> the rules that set it, in source order. Counting hits
-  // through this index finds a block's nearest neighbour without an O(n²) scan, and an
-  // identical block is just the case where every hit lands on one rule: ratio 1.
   const byDecl = new Map();
-  // Also flattens the multi-line selector lists this prints, which would otherwise break
-  // the one-line-per-finding format the report promises.
   const norm = (s) =>
     s
       .replace(/\s+/g, ' ')
@@ -203,21 +83,16 @@ function structureFindings(prepared, lineOf) {
       .split(';')
       .map(norm)
       .filter((d) => d.includes(':'));
-  for (const r of rules) {
-    const isEmpty = r.body.replace(/[;\s]/g, '') === '';
-    if (isEmpty)
+  for (const r of parseRules(text)) {
+    r.line = lineOf(r.at);
+    if (r.body.replace(/[;\s]/g, '') === '')
       out.push({
         line: r.line,
         msg: `empty rule — \`${norm(r.selector) || '(unnamed)'}\` has no declarations.`,
       });
     const decls = declsOf(r.body);
     const ctx = norm(r.context);
-    // An empty block has nothing to index, so it could never meet another one. A
-    // sentinel key pairs two of them like any other identical pair. Deduped so a block
-    // that sets one property twice cannot score above 1.
     const keys = decls.length ? [...new Set(decls)] : ['\0empty'];
-    // Matched on the declaration SET, so `.a{x;y}` and `.b{y;x}` are the same block —
-    // keyed on source order, every reordered copy of a block went unreported.
     const near = nearestOverlap(byDecl, ctx, keys);
     const same = near?.ratio === 1;
     if (same && norm(near.rule.selector) === norm(r.selector))
@@ -230,19 +105,6 @@ function structureFindings(prepared, lineOf) {
         line: r.line,
         msg: `repeated declarations — \`${norm(r.selector)}\` sets the same ${decls.length} declarations as \`${norm(near.rule.selector)}\` at line ${near.rule.line}, under the same conditions. One selector list, or a shared class.`,
       });
-    // A block that re-asserts the WHOLE of an earlier block (shared === the
-    // earlier count) then adds its own: a copied-then-extended component. The
-    // ratio gate misses it — a 12-decl block sharing 7 with a 7-decl block scores
-    // 0.58 — so this branch is containment, not ratio. The re-assertion may be
-    // dead (this selector already inherits the earlier rule) or a copy wanting
-    // a shared class; the message hedges both.
-    else if (near && !same && near.shared === near.rule.declCount && near.shared >= MIN_FULL_REDECL)
-      out.push({
-        line: r.line,
-        msg: `redeclares an earlier block — \`${norm(r.selector)}\` repeats all ${near.shared} declarations of \`${norm(near.rule.selector)}\` at line ${near.rule.line}. Drop them if this selector already inherits that rule; lift the shared set onto a common class if not.`,
-      });
-    // Byte-identical bodies are rare in hand-written CSS; a copied component that then
-    // drifted by one declaration is the common shape, and an equality test never sees it.
     else if (near && near.shared >= MIN_SHARED_DECLS && near.ratio >= MIN_OVERLAP_RATIO)
       out.push({
         line: r.line,
@@ -258,24 +120,7 @@ function structureFindings(prepared, lineOf) {
   return out;
 }
 
-// Inline axis only, both sides. `margin-top` is block-axis: it means the same thing in
-// every writing mode, so counting it as "physical" inflated the number with declarations
-// that carry no direction risk at all — on a real sheet most of the count was `top` and
-// `bottom`, and the figure measured nothing you could act on.
-const LOGICAL_PROP =
-  /(?<![\w-])(?:margin|padding|border|inset)-inline(?:-(?:start|end))?\s*:|(?<![\w-])inline-size\s*:|text-align\s*:\s*(?:start|end)\b/gi;
-const PHYSICAL_PROP =
-  /(?<![\w-])(?:margin|padding)-(?:right|left)\s*:|(?<![\w-])border-(?:right|left)(?:-(?:width|style|color))?\s*:|(?<![\w-])(?:right|left|inset)\s*:|text-align\s*:\s*(?:left|right)\b/gi;
-
-function directionMix(prepared) {
-  const logical = [...prepared.matchAll(LOGICAL_PROP)];
-  const physical = [...prepared.matchAll(PHYSICAL_PROP)];
-  return logical.length && physical.length
-    ? { logical: logical.length, physical: physical.length, at: physical.map((m) => m.index) }
-    : null;
-}
-
-function customPropertyFindings(files) {
+export function customPropertyFindings(files) {
   const declared = new Map();
   const used = new Map();
   const add = (map, name, path, line) => {
@@ -284,16 +129,13 @@ function customPropertyFindings(files) {
   };
 
   for (const f of files) {
-    for (const m of f.prepared.matchAll(/--[\w-]+(?=\s*:)/g))
+    for (const m of f.text.matchAll(/--[\w-]+(?=\s*:)/g))
       add(declared, m[0], f.path, f.lineOf(m.index));
-    for (const m of f.prepared.matchAll(/@property\s+(--[\w-]+)/g))
+    for (const m of f.text.matchAll(/@property\s+(--[\w-]+)/g))
       add(declared, m[1], f.path, f.lineOf(m.index));
-    for (const m of f.prepared.matchAll(/var\(\s*(--[\w-]+)/g))
+    for (const m of f.text.matchAll(/var\(\s*(--[\w-]+)/g))
       add(used, m[1], f.path, f.lineOf(m.index));
-    // JS-set tokens: setProperty('--x', v) is a declaration too (the hooks' token
-    // model counts it), but prepare blanks it out of host code, so scan raw.
-    // prepared === '' means anchor-less markup — prose mention is not a declaration.
-    for (const m of (f.prepared ? (f.raw ?? '') : '').matchAll(/setProperty\(\s*['"](--[\w-]+)/g))
+    for (const m of (f.text ? (f.raw ?? '') : '').matchAll(/setProperty\(\s*['"](--[\w-]+)/g))
       add(declared, m[1], f.path, f.lineOf(m.index));
   }
 
@@ -317,10 +159,7 @@ function customPropertyFindings(files) {
   return out;
 }
 
-// `/* csspro-ignore */` on a line suppresses findings on that line and the next
-// (the declaration it sits above). Scanned on raw, before prepare, because
-// comment-blanking would hide the marker. CLI-only; the per-edit hook is unaffected.
-function ignoreLines(raw) {
+export function ignoreLines(raw) {
   const ignore = new Set();
   raw.split('\n').forEach((l, i) => {
     if (l.includes('csspro-ignore')) {
@@ -331,10 +170,6 @@ function ignoreLines(raw) {
   return ignore;
 }
 
-// Recurse a directory for stylesheets. Lets `audit.mjs src/` work on any Node
-// version — `fs.globSync` needs Node 22, and a bare directory used to be rejected.
-// An unreadable subtree (EACCES) is skipped, not crashed — every other failure
-// path prints a clean `(skipped: …)`, and a stack trace here would break that.
 function walkDir(dir) {
   const out = [];
   let entries;
@@ -345,9 +180,6 @@ function walkDir(dir) {
   }
   for (const e of entries) {
     const p = path.join(dir, e.name);
-    // Dependencies and tooling state are not the project's CSS. Harmless while only
-    // stylesheets matched; once AUDITABLE took in .js/.ts, `audit.mjs .` walked every
-    // file in node_modules and reported findings against them.
     if (e.isDirectory()) {
       if (e.name !== 'node_modules' && !e.name.startsWith('.')) out.push(...walkDir(p));
     } else if (AUDITABLE.test(e.name)) out.push(p);
@@ -355,8 +187,6 @@ function walkDir(dir) {
   return out;
 }
 
-// The source offset of the synthetic block covering `idx`. Blocks are appended in
-// source order, so the last one starting at or before `idx` is the one it fell in.
 function sourceOf(blocks, idx) {
   let source = 0;
   for (const b of blocks) {
@@ -366,99 +196,50 @@ function sourceOf(blocks, idx) {
   return source;
 }
 
-// One definition, used by auditFile and by the self-test — a test that re-implements
-// this proves nothing about the code that ships.
-function lineLookupFor(raw, prepared, blocks) {
-  const lineAt = makeLineLookup(prepared);
+export function lineLookupFor(raw, text, blocks) {
+  const lineAt = lineCounter(text);
   return (idx) => lineAt(idx < raw.length ? idx : sourceOf(blocks, idx));
 }
 
-// A markup file with no style anchor holds no styles — without the anchor test,
-// prepare falls back to prepareCode and the whole document (prose included) is
-// scanned as flat CSS, so `never use transition: all` in a docs page produced a
-// BLOCK finding. One definition, used by auditFile and the self-test.
-function auditPrepare(raw, path, blocks) {
-  if (MARKUP_LANGS.test(path) && !MARKUP_ANCHOR.test(raw)) return '';
-  return prepare(raw, path, blocks);
+export function auditPrepare(raw, filePath) {
+  if (MARKUP_LANGS.test(filePath) && !MARKUP_ANCHOR.test(raw)) return { text: '', blocks: [] };
+  return prepare(raw, filePath);
 }
 
-function auditFile(path) {
+function auditFile(filePath) {
   let raw;
   try {
-    raw = fs.readFileSync(path, 'utf8');
+    raw = fs.readFileSync(filePath, 'utf8');
   } catch (e) {
-    return { path, error: `unreadable: ${e.code || e.message}` };
+    return { path: filePath, error: `unreadable: ${e.code || e.message}` };
   }
-  const blocks = [];
-  const prepared = auditPrepare(raw, path, blocks);
-  // `prepare` keeps the source as a same-length prefix and appends synthetic blocks
-  // for object-form styles and style="" attributes. An index past the source has no
-  // position of its own — reporting one anyway printed `b.html:10` for an 8-line file
-  // — but the object it was lifted from does, and `blocks` carries it. That line is
-  // both the one to print and the one a `csspro-ignore` marker sits above.
-  const lineOf = lineLookupFor(raw, prepared, blocks);
-  const sass = SASS_INDENTED.test(path);
+  const { text, blocks } = auditPrepare(raw, filePath);
+  const lineOf = lineLookupFor(raw, text, blocks);
   return {
-    path,
+    path: filePath,
     raw,
-    prepared,
+    text,
     lineOf,
     ignore: ignoreLines(raw),
-    block: runTable(BLOCK, prepared, path, lineOf),
-    advise: runTable(ADVISE, prepared, path, lineOf),
-    // Stylesheets only. Indented Sass is brace-less: parseRules would find nothing,
-    // so the SASS_NOTE's "skipped" stays honest rather than a silent parser no-op
-    // that a stray brace could later fabricate findings out of. A host file is worse
-    // than empty — its synthetic `x{ ... }` blocks are siblings by construction, so
-    // every component with two styled objects would read as a duplicate rule.
+    block: findings(BLOCK, text, filePath, lineOf),
+    advise: findings(ADVISE, text, filePath, lineOf),
     structure:
-      sass || !STYLESHEET.test(path)
+      SASS_INDENTED.test(filePath) || !STYLESHEET.test(filePath)
         ? []
-        : structureFindings(restoreStrings(prepared, raw), lineOf),
-    mix: directionMix(prepared),
-    declaresProps: /--[\w-]+\s*:/.test(prepared),
+        : structureFindings(forStructure(raw, filePath), lineOf),
+    declaresProps: /--[\w-]+\s*:/.test(text),
   };
 }
 
-// Collapse a sorted line set into compact ranges: [8,33,34] -> "8,33-34".
-// Precondition: `lines` is non-empty — callers guard on `lines.size`.
-function lineList(lines) {
-  if (!lines.size) return '';
-  const s = [...lines].sort((a, b) => a - b);
-  const runs = [];
-  let start = s[0],
-    prev = s[0];
-  for (let i = 1; i <= s.length; i++) {
-    if (i < s.length && s[i] === prev + 1) {
-      prev = s[i];
-      continue;
-    }
-    runs.push(start === prev ? `${start}` : `${start}-${prev}`);
-    start = prev = s[i];
-  }
-  return runs.join(',');
-}
-
-// One line per distinct message: `path:line,line,...  message`. Findings are
-// line-sorted and repeated messages collapse to a single line listing every
-// site — a sheet with fifteen `calc()` defects reads as one line, not fifteen.
-function formatGroup(path, findings) {
-  // Finite sentinel, not Infinity: Infinity - Infinity is NaN, which leaves the
-  // order of null-line findings spec-unstable. MAX_SAFE_INTEGER sorts them last.
-  const TAIL = Number.MAX_SAFE_INTEGER;
-  const ordered = [...findings].sort((a, b) => (a.line ?? TAIL) - (b.line ?? TAIL));
-  // Group by message — safe because every rule in the table has a unique msg.
+export function formatGroup(path, rows) {
   const byMsg = new Map();
-  for (const f of ordered) {
+  for (const f of [...rows].sort((a, b) => a.line - b.line)) {
     if (!byMsg.has(f.msg)) byMsg.set(f.msg, new Set());
-    if (f.line != null) byMsg.get(f.msg).add(f.line);
+    byMsg.get(f.msg).add(f.line);
   }
-  const out = [];
-  for (const [msg, lines] of byMsg) {
-    const loc = lines.size ? `${path}:${lineList(lines)}` : '';
-    out.push(loc ? `  ${loc}  ${msg}` : `  ${msg}`);
-  }
-  return out;
+  return [...byMsg].map(
+    ([msg, lines]) => `  ${path}:${[...lines].sort((a, b) => a - b).join(',')}  ${msg}`,
+  );
 }
 
 const SASS_NOTE =
@@ -475,526 +256,44 @@ function report(r) {
     console.log(`== ${r.path} ==\n  (skipped: ${r.error})`);
     return;
   }
-  const { path, mix, lineOf } = r;
   const groups = GROUPS.filter(([key]) => r[key].length);
-  // `mix` counts toward the header: a file that printed `clean` and then a note about
-  // itself contradicted itself on two adjacent lines.
-  console.log(groups.length || mix ? `== ${path} ==` : `== ${path} ==  clean`);
+  console.log(groups.length ? `== ${r.path} ==` : `== ${r.path} ==  clean`);
   for (const [key, heading] of groups) {
     console.log(heading);
-    for (const line of formatGroup(path, r[key])) console.log(line);
+    for (const line of formatGroup(r.path, r[key])) console.log(line);
   }
-  if (mix)
-    console.log(
-      `  ${path}:${lineList(new Set(mix.at.map((i) => lineOf(i))))}  (note: mixes direction conventions — ${mix.physical} physical inline-axis declaration(s) here do not flip in RTL, but ${mix.logical} logical one(s) elsewhere in the file do)`,
-    );
-  if (SASS_INDENTED.test(path)) console.log(SASS_NOTE);
+  if (SASS_INDENTED.test(r.path)) console.log(SASS_NOTE);
 }
 
-function selfTest() {
-  const src = [
-    ':root { --used: red; --unused: blue; }',
-    '.a { color: var(--used); }',
-    '.b { transition: all .2s; }',
-    '.c { }',
-    '.c { }',
-    '.d { width: calc(100%-1px); }',
-    '.e { color: var(--typo); }',
-    '@property --registered { syntax: "<length>"; }',
-    '.f { width: var(--registered); }',
-    '.g { color: red; .h { color: blue; } }',
-    '.#{$name} {}',
-    '@import "reset.css";',
-    '.i { }',
-    '.n,.o { color: green; }',
-    '.n, .o {  color:green; }',
-    '.p { .q { color: blue; } width: 1px; }',
-    '.p { width: 1px; }',
-    ".r[data-x='foo'] { color: teal; }",
-    ".r[data-x='bar'] { color: teal; }",
-    '.s { font-weight: 700; line-height: 1.2; }',
-    '.t { font-weight: 700; line-height: 1.2; }',
-    '.u { display: none; }',
-    '.v { display: none; }',
-    '@media print { .w { color: red; } }',
-    '.x2 { color: red; }',
-    '.y2 { width: calc(100% - 2 * var(--s-6)); }',
-    '.z2 { border-inline-start: 3px solid red; border-radius: 0 4px 4px 0; }',
-    '.z3 { border-inline-start: 3px solid red; border-radius: 4px; }',
-    '.z4 { grid-column: 1 / -1; }',
-    '.cb { width: calc(var(--used) -8px); }',
-    '.g1 { grid-column: 1; }',
-    '.g2 { grid-column: 2; }',
-    '.oa { color: red; background: blue; }',
-    '.ob { background: blue; color: red; }',
-    '.na { font-family: serif; font-size: 1rem; line-height: 1.5; color: tan; margin: 0; }',
-    '.nb { font-family: serif; font-size: 1rem; line-height: 1.5; color: tan; padding: 0; }',
-    '.pa { font-family: monospace; font-weight: 400; text-transform: none; width: 3px; }',
-    '.pb { font-family: monospace; font-weight: 400; text-transform: none; height: 3px; }',
-    '.qa { color: navy; border: 0; outline: 0; z-index: 1; }',
-    '.qb { color: navy; border: 0; outline: 0; z-index: 1; letter-spacing: 0; word-spacing: 0; text-indent: 0; opacity: 1; }',
-    '.da { color: navy; border: 0; background: red; z-index: 1; margin: 0; }',
-    '.db { color: navy; border: 0; background: red; z-index: 1; margin: 0; padding: 0; }',
-    '.z5 { border-inline-start: 3px solid red; border-radius: 10px / 0 10px; }',
-    '.z6 { border-inline-start: 3px solid red; border-radius: 8px / 4px; }',
-    '.z7 { border-inline-start: 3px solid red; border-radius: 4px 4px 0; }',
-    '@media print { @supports (color: red) { .z8 { color: teal; font-weight: 700; } } }',
-    '.z8 { color: teal; font-weight: 700; }',
-    '.za { @media print { .zb { color: olive; font-style: italic; } } }',
-    '.zb { color: olive; font-style: italic; }',
-  ].join('\n');
-  const prepared = prepare(src, 'test.css');
-  const lineOf = makeLineLookup(prepared);
-  const block = runTable(BLOCK, prepared, 'test.css', lineOf);
-  const advise = runTable(ADVISE, prepared, 'test.css', lineOf);
-  const whole = [
-    ...structureFindings(restoreStrings(prepared, src), lineOf),
-    ...customPropertyFindings([{ path: 'test.css', prepared, lineOf }]),
-  ];
-
-  const aPre = prepare(':root { --shared: red; --dead: blue; }', 'a.css');
-  const bPre = prepare('.x { color: var(--shared); } .y { color: var(--missing); }', 'b.css');
-  const propsAB = customPropertyFindings([
-    { path: 'a.css', prepared: aPre, lineOf: makeLineLookup(aPre) },
-    { path: 'b.css', prepared: bPre, lineOf: makeLineLookup(bPre) },
-  ]);
-  const phas = (sub) => propsAB.some((f) => f.msg.includes(sub));
-  const cPre = prepare(':root { --dup: 1; }\n.c { color: var(--nope); }', 'c.css');
-  const dPre = prepare(':root { --dup: 2; }\n.d { color: var(--nope); }', 'd.css');
-  const propsCD = customPropertyFindings([
-    { path: 'c.css', prepared: cPre, lineOf: makeLineLookup(cPre) },
-    { path: 'd.css', prepared: dPre, lineOf: makeLineLookup(dPre) },
-  ]);
-  const adviseOn = (css, name) => {
-    const p = prepare(css, name);
-    return runTable(ADVISE, p, name, makeLineLookup(p));
-  };
-  const blockOn = (css, name) => {
-    const p = prepare(css, name);
-    return runTable(BLOCK, p, name, makeLineLookup(p));
-  };
-  // Line 6 is the declaration; line 2 is prose that merely names it. A markup file
-  // has to report the first and stay silent on the second.
-  const vueBlock = blockOn(
-    [
-      '<template>',
-      '  <p>never write transition: all</p>',
-      '</template>',
-      '',
-      '<style>',
-      '.a { transition: all 1s; }',
-      '</style>',
-    ].join('\n'),
-    'a.vue',
-  );
-  // The attribute sits on line 2 and the object on line 3, so a lookup that fell back
-  // to "start of file" would read as line 1 and fail rather than pass by accident.
-  const onLine = (raw, name) => {
-    const blocks = [];
-    const p = auditPrepare(raw, name, blocks);
-    return runTable(BLOCK, p, name, lineLookupFor(raw, p, blocks));
-  };
-  // Markup holding prose but no style anchor: prepare's fallback scanned the whole
-  // document as CSS, and these two sentences produced BLOCK findings.
-  const proseBlock = onLine(
-    '<p>never write transition: all</p>\n<p>z-index: 9999 is bad</p>\n',
-    'prose.html',
-  );
-  const attrBlock = onLine('<div\n  style="color: red; color: red"\n></div>\n', 'b.html');
-  const objBlock = onLine(
-    // Test data, not a declaration. styleObjectBlocks reads unblanked code on purpose
-    // (template literals carry real CSS), so it mines this string too. csspro-ignore
-    'const A = 1;\nconst B = 2;\nconst S = <div style={{ transitionProperty: "all" }} />;\n',
-    'c.tsx',
-  );
-  const nullLine = formatGroup('x.tsx', [{ line: null, msg: 'no-position finding' }]);
-  const smoothAdvise = adviseOn(
-    'html { scroll-behavior: smooth; }\n@media (prefers-reduced-motion: reduce) { .x { animation: none; } }',
-    'smooth.css',
-  );
-  const guardedAdvise = adviseOn(
-    'html { scroll-behavior: smooth; }\n@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }',
-    'guarded.css',
-  );
-  const focusMissing = adviseOn(
-    '.btn { cursor: pointer; }\n.a:focus-visible { outline: 1px; }',
-    'fm.css',
-  );
-  const focusCovered = adviseOn(
-    '.btn { cursor: pointer; }\n.btn:focus-visible { outline: 1px; }',
-    'fc.css',
-  );
-  const focusNoVis = adviseOn('.btn { cursor: pointer; }', 'fn.css');
-  // The :focus-visible rule matches through a comma-bearing :is() list — a flat
-  // split on ',' used to shred it and flag .item as uncovered.
-  const focusIsCovered = adviseOn(
-    '.item { cursor: pointer; }\n.item:is(.a, .b):focus-visible { outline: 1px; }',
-    'fis.css',
-  );
-  // A token set from JS is declared even though prepare blanks the call site.
-  const jsSetProps = customPropertyFindings([
-    {
-      path: 'theme.ts',
-      raw: "document.documentElement.style.setProperty('--jsaccent', c);",
-      prepared: prepare("document.documentElement.style.setProperty('--jsaccent', c);", 'theme.ts'),
-      lineOf: makeLineLookup(
-        prepare("document.documentElement.style.setProperty('--jsaccent', c);", 'theme.ts'),
-      ),
-    },
-    {
-      path: 'use.css',
-      prepared: prepare('.x { color: var(--jsaccent); }', 'use.css'),
-      lineOf: makeLineLookup(prepare('.x { color: var(--jsaccent); }', 'use.css')),
-    },
-  ]);
-  // A nested rule used to hide its parent from every block-scoped check — the flat block
-  // regex cannot span the child's `{`, so only `&:hover` and `.icon` were ever scanned
-  // and `.btn`'s own declarations went unread.
-  const nestedBlock = blockOn('.btn { color: red; color: red; &:hover { opacity: 1 } }', 'n.scss');
-  const nestedAdvise = adviseOn(
-    '.a:focus-visible { outline: 1px }\n.btn { cursor: pointer; .icon { color: red } }',
-    'n.scss',
-  );
-  // The per-edit hook's engagement gate, over the added text of one Write or Edit. The
-  // audit never consults it — it is tested here because this is the only importable
-  // entry point into the plugin, and a gate that engages on ordinary TypeScript turns a
-  // PreToolUse hook into a deny on code holding no CSS.
-  const engages = (t) => STYLE_MARKERS.test(t) || DECLARATION.test(t);
-  const GATE = [
-    [
-      false,
-      'interface Point {\n  x: number;\n  y: number;\n}\nconst prev = (i) => Math.max(0, i-1);',
-    ],
-    [false, '  onClick: () => void;\n  items: string[];\n  maxLen: 100;'],
-    [false, 'const n = Math.min(len-1, i+1);'],
-    [false, '  timeout: 3000,\n  version: "1.0.0",\n  ratio: 1.5,'],
-    [false, 'export function toGrid(rows: Row[]): Cell[][] {\n  return rows.map(toCells);\n}'],
-    [true, '  transition: all 0.3s;'],
-    [true, '  background-color: red;\n  background: blue;'],
-    [true, '  width: calc(100%-1px);'],
-    [true, '  color: var(--a, --b);'],
-    [true, '  padding: 4px;'],
-    [true, '  --brand: blue;'],
-    [true, 'const S = styled.div`color: red`;'],
-    [true, '<div style={{ color: "red" }} />'],
-  ];
-  const dupUnused = propsCD.filter((f) => f.msg.includes('--dup') && /never read/.test(f.msg));
-  const nopeUndef = propsCD.filter((f) => f.msg.includes('--nope') && /not declared/.test(f.msg));
-  const sites = (arr) => new Set(arr.map((f) => f.path));
-  const has = (arr, sub) => arr.some((f) => f.msg.includes(sub));
-  const neverRead = whole.filter((f) => /never read/.test(f.msg)).map((f) => f.msg);
-  const notDeclared = whole.filter((f) => /not declared/.test(f.msg)).map((f) => f.msg);
-  const tests = [
-    ['BLOCK catches transition: all', has(block, 'animates every property')],
-    ['BLOCK catches calc() missing whitespace', has(block, 'whitespace')],
-    ['WHOLE catches empty rule', has(whole, 'no declarations')],
-    ['WHOLE catches duplicate block', has(whole, 'identical to the one at line')],
-    ['WHOLE catches unused --unused', neverRead.some((m) => m.includes('--unused'))],
-    ['WHOLE catches undefined --typo', notDeclared.some((m) => m.includes('--typo'))],
-    ['no false unused on --used', !neverRead.some((m) => m.includes('--used'))],
-    [
-      'no false unused on @property --registered',
-      !neverRead.some((m) => m.includes('--registered')),
-    ],
-    [
-      'no false undefined on @property --registered',
-      !notDeclared.some((m) => m.includes('--registered')),
-    ],
-    [
-      'WHOLE empty rule pinned to line 4',
-      whole.some((f) => f.line === 4 && /no declarations/.test(f.msg)),
-    ],
-    [
-      'WHOLE duplicate pinned to line 5 referencing line 4',
-      whole.some((f) => f.line === 5 && /line 4/.test(f.msg)),
-    ],
-    [
-      'WHOLE no garbage selector from mixed nesting',
-      !whole.some((f) => /color: red; \.h/.test(f.msg)),
-    ],
-    [
-      'WHOLE .g keeps its declarations',
-      !whole.some((f) => f.msg.includes('`.g`') && /no declarations/.test(f.msg)),
-    ],
-    [
-      'WHOLE no spurious (unnamed) from interpolation',
-      !whole.some((f) => f.msg.includes('(unnamed)')),
-    ],
-    [
-      'WHOLE rule after statement pinned to own line, clean selector',
-      whole.some((f) => f.line === 13 && /no declarations/.test(f.msg) && f.msg.includes('`.i`')),
-    ],
-    [
-      'Sass note scoped to .sass only',
-      !SASS_INDENTED.test('x.scss') && SASS_INDENTED.test('x.sass'),
-    ],
-    [
-      'WHOLE .n, .o formatting variant flagged duplicate',
-      whole.some((f) => /identical to the one at line/.test(f.msg) && f.msg.includes('.n,')),
-    ],
-    [
-      'WHOLE decl after nested block participates (same-selector dup)',
-      whole.some((f) => /identical to the one at line/.test(f.msg) && f.msg.includes('`.p`')),
-    ],
-    [
-      'WHOLE no false duplicate between .p parent and .q child',
-      !whole.some((f) => /identical/.test(f.msg) && f.msg.includes('`.q`')),
-    ],
-    ['cross-file --shared (used in sibling) not flagged', !phas('--shared')],
-    ['cross-file --dead (unused everywhere) flagged', phas('--dead')],
-    ['cross-file --missing (declared nowhere) flagged undefined', phas('--missing')],
-    [
-      'cross-file --dup unused reported at both sites',
-      dupUnused.length === 2 && sites(dupUnused).size === 2,
-    ],
-    [
-      'cross-file --nope undefined reported at both sites',
-      nopeUndef.length === 2 && sites(nopeUndef).size === 2,
-    ],
-    [
-      'no false duplicate between two same-length attribute values',
-      !whole.some((f) => /identical to the one at line/.test(f.msg) && f.msg.includes('data-x')),
-    ],
-    [
-      'duplicate-block message keeps the real selector, not the blanked one',
-      !whole.some((f) => /`[^`]*\[data-x='\s+'\]/.test(f.msg)),
-    ],
-    [
-      'WHOLE catches repeated declarations across two selectors',
-      whole.some((f) => /repeated declarations/.test(f.msg) && f.msg.includes('`.t`')),
-    ],
-    [
-      'one shared declaration is below the threshold, not reported',
-      !whole.some((f) => /repeated declarations/.test(f.msg) && f.msg.includes('`.v`')),
-    ],
-    [
-      'identical declarations in a different at-rule context not reported',
-      !whole.some((f) => /repeated declarations/.test(f.msg) && f.msg.includes('`.x2`')),
-    ],
-    [
-      'two at-rules deep: same selector+decls as top-level not a duplicate (context scopes)',
-      !whole.some(
-        (f) =>
-          (f.line === 46 || f.line === 47) &&
-          /duplicate|repeated declarations|overlapping|redeclares/.test(f.msg),
-      ),
-    ],
-    [
-      'nested at-rule inside a rule: inner scoped, not a duplicate of the same selector top-level',
-      !whole.some(
-        (f) =>
-          (f.line === 48 || f.line === 49) &&
-          /duplicate|repeated declarations|overlapping|redeclares/.test(f.msg),
-      ),
-    ],
-    [
-      'BLOCK: no false calc() on a custom property with a -digit tail',
-      !has(block, 'whitespace') || !block.some((f) => f.line === 26),
-    ],
-    [
-      'BLOCK catches calc() missing trailing space after a ) operand',
-      block.some((f) => f.line === 30 && /whitespace/.test(f.msg)),
-    ],
-    ['every BLOCK finding carries a line', block.every((f) => f.line != null)],
-    ['every ADVISE finding carries a line', advise.every((f) => f.line != null)],
-    [
-      'ADVISE catches direction-blind radius beside a logical inline edge',
-      has(advise, 'flips in RTL') || has(advise, 'left and right corners differ'),
-    ],
-    [
-      'ADVISE: uniform radius (plain and slash) beside a logical inline edge stays silent',
-      !advise.some((f) => /corners differ/.test(f.msg) && (f.line === 28 || f.line === 44)),
-    ],
-    [
-      'ADVISE: slash radius with an asymmetric vertical half fires',
-      advise.some((f) => f.line === 43 && /corners differ/.test(f.msg)),
-    ],
-    [
-      'ADVISE: three-value radius with BL != BR fires',
-      advise.some((f) => f.line === 45 && /corners differ/.test(f.msg)),
-    ],
-    [
-      'ADVISE: grid-column 1 / -1 is a full span, not a reorder',
-      !advise.some((f) => f.line === 29 && /Visual order/.test(f.msg)),
-    ],
-    [
-      'ADVISE: grid-column 1 is the flow default, not a reorder',
-      !advise.some((f) => f.line === 31 && /Visual order/.test(f.msg)),
-    ],
-    [
-      'ADVISE: grid-column 2 still reads as a reorder',
-      advise.some((f) => f.line === 32 && /Visual order/.test(f.msg)),
-    ],
-    [
-      'ADVISE: smooth scroll not vouched for by an unrelated reduced-motion block',
-      has(smoothAdvise, 'Smooth scrolling'),
-    ],
-    [
-      'ADVISE: smooth scroll silent once a guard sets scroll-behavior: auto',
-      !has(guardedAdvise, 'Smooth scrolling'),
-    ],
-    [
-      'WHOLE catches repeated declarations written in a different order',
-      whole.some((f) => f.line === 34 && /repeated declarations/.test(f.msg)),
-    ],
-    [
-      'WHOLE catches a four-declaration partial overlap',
-      whole.some((f) => f.line === 36 && /overlapping declarations/.test(f.msg)),
-    ],
-    [
-      'three shared declarations are below the overlap threshold',
-      !whole.some((f) => f.line === 38 && /overlapping declarations/.test(f.msg)),
-    ],
-    [
-      'four shared declarations in a much longer block are below the ratio',
-      !whole.some((f) => f.line === 40 && /overlapping declarations/.test(f.msg)),
-    ],
-    [
-      'WHOLE catches a block that redeclares an entire earlier block',
-      whole.some((f) => f.line === 42 && /redeclares an earlier block/.test(f.msg)),
-    ],
-    [
-      'a 4-decl block fully inside a longer one is not a redeclaration',
-      !whole.some((f) => /redeclares an earlier block/.test(f.msg) && f.msg.includes('`.qb`')),
-    ],
-    ['no multi-line selector in a whole-file message', !whole.some((f) => f.msg.includes('\n'))],
-    [
-      'direction mix counted only when both conventions appear',
-      directionMix('.a{color:red}') === null,
-    ],
-    [
-      'direction mix ignores block-axis physical properties',
-      directionMix('.a{margin-inline-start:1px;margin-top:2px}') === null,
-    ],
-    [
-      'direction mix reports a line for each physical inline-axis site',
-      directionMix('.a{margin-inline-start:1px;margin-left:2px}')?.at.length === 1,
-    ],
-    ['prepare preserves length (restoreStrings invariant)', prepared.length === src.length],
-    [
-      'ADVISE flags cursor:pointer selector missing from :focus-visible list',
-      has(focusMissing, 'Interactive'),
-    ],
-    [
-      'ADVISE silent when cursor:pointer covered by a :focus-visible rule',
-      !has(focusCovered, 'Interactive'),
-    ],
-    [
-      'ADVISE focus rule silent when the file does no :focus-visible at all',
-      !has(focusNoVis, 'Interactive'),
-    ],
-    [
-      'ADVISE silent when :focus-visible coverage goes through :is()',
-      !has(focusIsCovered, 'Interactive'),
-    ],
-    ['BLOCK silent on anchor-less markup prose', proseBlock.length === 0],
-    [
-      'JS-set custom property counts as declared',
-      !jsSetProps.some((f) => /--jsaccent/.test(f.msg)),
-    ],
-    [
-      'markup finding carries its SOURCE line, not a post-extraction line',
-      vueBlock.some((f) => f.line === 6 && /animates every property/.test(f.msg)),
-    ],
-    [
-      'markup prose naming a declaration is not a second finding',
-      vueBlock.filter((f) => /animates every property/.test(f.msg)).length === 1,
-    ],
-    [
-      'style="" attribute keeps block-scoped rule coverage',
-      attrBlock.some((f) => /set twice to the same value/.test(f.msg)),
-    ],
-    [
-      'style="" finding reports the attribute\'s line, not one past EOF',
-      attrBlock.some((f) => /set twice to the same value/.test(f.msg) && f.line === 2),
-    ],
-    [
-      'object-form CSS-in-JS finding reports the line of its object literal',
-      objBlock.some((f) => /animates every property/.test(f.msg) && f.line === 3),
-    ],
-    [
-      'a finding with no line prints its message with no location',
-      nullLine.length === 1 && !nullLine[0].includes('x.tsx'),
-    ],
-    [
-      'BLOCK scans the parent block of a nested rule',
-      has(nestedBlock, 'set twice to the same value'),
-    ],
-    ['ADVISE scans the parent block of a nested rule', has(nestedAdvise, 'Interactive')],
-    ...GATE.map(([want, t]) => [
-      `hook gate ${want ? 'engages on' : 'ignores'}: ${t.split('\n')[0].trim().slice(0, 44)}`,
-      engages(t) === want,
-    ]),
-    [
-      'csspro-ignore suppresses the marker line and the next',
-      (() => {
-        const ign = ignoreLines('a\n/* csspro-ignore */\nb\nc');
-        return ign.has(2) && ign.has(3) && !ign.has(1) && !ign.has(4);
-      })(),
-    ],
-  ];
-  let fail = 0;
-  for (const [name, ok] of tests) {
-    console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
-    if (!ok) fail++;
+function main(argv) {
+  let opts;
+  let positionals;
+  try {
+    ({ values: opts, positionals } = parseArgs({
+      args: argv,
+      options: {
+        strict: { type: 'boolean', default: false },
+        json: { type: 'boolean', default: false },
+        help: { type: 'boolean', short: 'h', default: false },
+      },
+      allowPositionals: true,
+    }));
+  } catch (e) {
+    console.log(`${e.message}\n\n${USAGE}`);
+    return 1;
   }
-  console.log(fail ? `\n${fail} self-test(s) failed.` : '\nAll self-tests passed.');
-  return fail ? 1 : 0;
-}
-
-function main(args) {
-  if (args.includes('--help') || args.includes('-h')) {
+  if (opts.help) {
     console.log(USAGE);
     return 0;
   }
-  if (args.includes('--list-rules')) {
-    console.log('BLOCK — provable, fix:');
-    for (const r of BLOCK) console.log(`  ${r.msg}`);
-    console.log('\nADVISE — measurable, confirm or fix:');
-    for (const r of ADVISE) console.log(`  ${r.msg}`);
-    return 0;
-  }
-  const strict = args.includes('--strict');
-  const json = args.includes('--json');
-  const wantsSelfTest = args.includes('--self-test');
-  const argv = args.filter(
-    (a) =>
-      a !== '--strict' &&
-      a !== '--json' &&
-      a !== '--self-test' &&
-      a !== '--help' &&
-      a !== '-h' &&
-      a !== '--list-rules',
-  );
-  if (wantsSelfTest || argv.length === 0) {
-    if (argv.length === 0 && !wantsSelfTest)
-      console.log('css-pro audit: no files given; running self-test.\n');
-    return selfTest();
-  }
-  if (argv.some(isGlob) && typeof fs.globSync !== 'function') {
-    if (json)
-      console.log(
-        JSON.stringify([
-          {
-            path: null,
-            line: null,
-            severity: 'error',
-            msg: 'glob arguments need Node 22 or newer; pass a directory or explicit file paths instead',
-          },
-        ]),
-      );
-    else
-      console.log(
-        'Glob arguments need Node 22 or newer; pass a directory or explicit file paths instead.',
-      );
+  if (positionals.length === 0) {
+    console.log(USAGE);
     return 1;
   }
+
   let failed = 0;
-  // Skipped args (empty glob/dir, non-style file) are collected, not printed
-  // inline — printed inline they would precede the JSON array and break
-  // `JSON.parse(stdout)`. In --json they surface as error rows instead.
   const skips = [];
-  const resolved = argv.flatMap((a) => {
+  const resolved = positionals.flatMap((a) => {
     if (isGlob(a)) {
       const hits = fs.globSync(a);
       if (hits.length === 0) {
@@ -1018,12 +317,7 @@ function main(args) {
     }
     return a;
   });
-  // A directory argument and an explicit file inside it both resolve to that file.
-  // Auditing it twice printed every finding twice, and quadrupled its custom-property
-  // findings — those are collected per result, grouped by path, then applied per result.
-  // Keyed on the resolved path, not the string: `walkDir` builds `a\b.css` on Windows
-  // while the argument beside it reads `a/b.css`, and a set of raw strings sees two
-  // files. The argument's own spelling is what gets printed.
+
   const seen = new Set();
   const paths = [];
   for (const p of resolved) {
@@ -1034,19 +328,16 @@ function main(args) {
   }
 
   const results = [];
-  for (const path of paths) {
-    if (!AUDITABLE.test(path)) {
-      // A file that holds no CSS at all is a benign skip (exit stays 0), not a
-      // failed arg — passing a whole source tree and having the non-styling files
-      // ignored is the normal case, not a mistake worth failing a build over.
+  for (const p of paths) {
+    if (!AUDITABLE.test(p)) {
       skips.push({
-        arg: path,
+        arg: p,
         msg: 'audit targets stylesheets, CSS-in-JS, and single-file component styles',
         sev: 'note',
       });
       continue;
     }
-    const r = auditFile(path);
+    const r = auditFile(p);
     if (r.error) failed++;
     results.push(r);
   }
@@ -1057,23 +348,20 @@ function main(args) {
     propsByPath.get(f.path).push(f);
   }
 
-  // Apply `csspro-ignore` per file, then assemble whole-file findings. A finding
-  // with no line (none currently) survives the filter — only line-pinned ones drop.
   const counts = { files: 0, block: 0, advise: 0, whole: 0 };
   for (const r of results) {
     if (r.error) continue;
-    const keep = (f) => f.line == null || !r.ignore.has(f.line);
+    const keep = (f) => !r.ignore.has(f.line);
     r.block = r.block.filter(keep);
     r.advise = r.advise.filter(keep);
-    r.structure = r.structure.filter(keep);
-    r.whole = [...r.structure, ...(propsByPath.get(r.path) ?? []).filter(keep)];
+    r.whole = [...r.structure.filter(keep), ...(propsByPath.get(r.path) ?? []).filter(keep)];
     counts.files++;
     counts.block += r.block.length;
     counts.advise += r.advise.length;
     counts.whole += r.whole.length;
   }
 
-  if (json) {
+  if (opts.json) {
     const out = [];
     for (const s of skips)
       out.push({ path: s.arg, line: null, severity: s.sev, msg: `skipped: ${s.msg}` });
@@ -1082,19 +370,12 @@ function main(args) {
         out.push({ path: r.path, line: null, severity: 'error', msg: r.error });
         continue;
       }
-      for (const f of r.block)
-        out.push({ path: r.path, line: f.line, severity: 'block', msg: f.msg });
-      for (const f of r.advise)
-        out.push({ path: r.path, line: f.line, severity: 'advise', msg: f.msg });
-      for (const f of r.whole)
-        out.push({ path: r.path, line: f.line, severity: 'whole', msg: f.msg });
-      if (r.mix)
-        out.push({
-          path: r.path,
-          line: null,
-          severity: 'note',
-          msg: `mixes direction conventions — ${r.mix.physical} physical, ${r.mix.logical} logical inline-axis declarations`,
-        });
+      for (const [key, sev] of [
+        ['block', 'block'],
+        ['advise', 'advise'],
+        ['whole', 'whole'],
+      ])
+        for (const f of r[key]) out.push({ path: r.path, line: f.line, severity: sev, msg: f.msg });
     }
     console.log(JSON.stringify(out, null, 2));
   } else {
@@ -1108,13 +389,14 @@ function main(args) {
         'Scoped to one sheet: custom properties were resolved against it alone, so a token shared with a sibling sheet reads as dead or undefined here. Pass every stylesheet to resolve them.',
       );
     const undisposed = counts.advise + counts.whole;
-    if (undisposed && !strict)
+    if (undisposed && !opts.strict)
       console.log(
         `${undisposed} ADVISE/WHOLE-FILE finding(s) are reported, not gated — confirm each intentional or fix it (css-audit SKILL.md, "Done when"). \`--strict\` gates them.`,
       );
   }
-  const gated = strict ? counts.block + counts.advise + counts.whole : counts.block;
+  const gated = opts.strict ? counts.block + counts.advise + counts.whole : counts.block;
   return gated > 0 || failed > 0 ? 1 : 0;
 }
 
-process.exitCode = main(process.argv.slice(2));
+if (process.argv[1] === fileURLToPath(import.meta.url))
+  process.exitCode = main(process.argv.slice(2));
