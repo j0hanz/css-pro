@@ -140,7 +140,7 @@ element.style.setProperty('--swipe-amount', `${distance}px`); // bad: recalc on 
 element.style.transform = `translateY(${distance}px)`; // good: only this element
 ```
 
-Same trade in Motion / Framer Motion — the shorthand props assemble the `transform` from custom properties, which no engine accelerate, so Motion write them per frame from rAF:
+Same trade in Motion / Framer Motion:
 
 ```jsx
 <motion.div animate={{ x: 100 }} />                          // custom-property transform, rAF each frame — stutters under load

@@ -1,11 +1,11 @@
 ---
 name: css-audit
-description: Audit whole CSS files for defects — stylesheets, CSS-in-JS, Vue/Svelte/Astro/HTML component styles — or review a CSS or motion diff. Not mechanics — css-craft; not motion decisions — motion-craft.
+description: Audit whole CSS files for defects the per-edit hook never re-checks — duplicated rules, unused or undefined custom properties — review a CSS or motion diff, or gate styles in CI. Reads stylesheets, CSS-in-JS, Vue/Svelte/Astro/HTML component styles. Not mechanics — css-craft; not motion decisions — motion-craft; nothing to audit in Tailwind utilities.
 ---
 
 # CSS Audit
 
-The per-edit hook only checks the lines you touch, so a file accretes defects it would catch on a fresh write — `transition: all`, `calc()` with no whitespace, a longhand set before its shorthand, `100vh`. Two scales, one bar — only provable defects; a motion review adds feel judgment. An **audit** reads the whole file; a **review** reads the changed lines of a diff.
+Two scales, one bar — only provable defects; a motion review adds feel judgment. An **audit** reads the whole file, catching what the per-edit hook cannot see because it only reads the lines you touch. A **review** reads the changed lines of a diff.
 
 ## Audit — whole file
 
@@ -14,62 +14,48 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/css-audit/audit.mjs" <file|dir|glob>... [--st
 node "${CLAUDE_PLUGIN_ROOT}/skills/css-audit/audit.mjs" --help
 ```
 
-Pass every file that holds CSS — stylesheets (`.css`/`.scss`/`.sass`/`.less`), CSS-in-JS (`.js`/`.jsx`/`.ts`/`.tsx` and their `.mjs`/`.cjs`/`.mts`/`.cts` variants), and single-file components (`.vue`/`.svelte`/`.astro`/`.html`), the same set the per-edit hook engages on. A directory argument is recursed for all of them, skipping `node_modules` and dot-directories; a glob expands inside the script, so any enumeration of the project's files works in any shell. Anything else is a benign skip that does not affect the exit code. Whole-file structure checks run on stylesheets only — a host file's styles become synthetic blocks that are siblings by construction, so every component with two styled objects would read as a duplicate rule. Indented Sass (`.sass`) gets the rule table and custom-property checks only — the empty/duplicate rule checks are brace-based and report as skipped. A glob matching nothing or an unreadable file exits non-zero — a gate that audits nothing fails instead of passing. Prints `file:line` findings grouped by severity, uncapped, then a count; exits non-zero if any provable (BLOCK) defect remains. `--strict` gates ADVISE and whole-file findings too, for CI. `--json` emits one flat array `[{path,line,severity,msg}]` (no grouping, no count) for piping into another tool. `--help` prints usage; no arguments prints it and exits non-zero.
+Pass every file that holds CSS in one run — a directory recurses, a glob expands inside the script, so any enumeration of the project's files works in any shell. `--help` prints the file types it reads, the flags and the exit codes. Two things the run itself does not explain:
 
-Suppress a false positive: put `/* csspro-ignore */` on the line above the finding (or on the same line). It covers that line and the next, so a finding whose line is either is dropped from the report — the cheapest way to silence an intentional ADVISE or whole-file item without a `--strict` failure. Use it sparingly; a block of ignores is a smell that the rule is wrong for this codebase, not that the code is right.
+- **Scope decides the custom-property findings.** They resolve only across the files passed in one run, so a single sheet reports every token it exports as dead and every token it imports as undefined. The script says so when it happens — that note means the scope was too narrow, not that the sheet is dirty.
+- **Whole-file structure checks run on stylesheets only.** A host file's styles become synthetic blocks that are siblings by construction, so every component with two styled objects would read as a duplicate rule.
 
-Custom properties resolve only across the files passed in one run. Audit a single sheet and the script says so — every token it exports reads as dead, every token it imports as undefined. That note means the scope was too narrow, not that the sheet is dirty.
+Suppress a false positive with `/* csspro-ignore */` above the finding. Use it sparingly; a block of ignores says the rule is wrong for this codebase, not that the code is right. In CI, `--strict` gates ADVISE and whole-file findings too — and an intentional finding gets the marker, next to the code it explains, rather than a CI exclusion.
 
-**Done when** every target file has been re-run and is clean, or carries only items kept on purpose — every remaining BLOCK a `file:line` with its keep-reason. ADVISE and whole-file findings are reported, not gated; each confirmed intentional, else fixed. The run prints how many are still awaiting that disposition; `--strict` turns the count into an exit code.
-
-### In CI
-
-Run with `--strict` so ADVISE and whole-file findings fail the build, not just BLOCK. Gate every styled file on one command — a directory argument recurses, or a glob covers a subtree:
-
-```sh
-node "${CLAUDE_PLUGIN_ROOT}/skills/css-audit/audit.mjs" src/ --strict
-# or per-sheet, exit code is the verdict
-node "${CLAUDE_PLUGIN_ROOT}/skills/css-audit/audit.mjs" "src/**/*.css" --strict
-```
-
-Exit 0 is clean; 1 means a gated finding remains or a file/glob failed. `--json` gives a machine-readable list for a PR comment or check-run annotation; pipe it to whatever formats the report. An intentional finding that should not block the build gets a `/* csspro-ignore */` marker, not a CI exclusion — the marker stays next to the code it explains.
+**Done when** every target file has been re-run and is clean, or carries only items kept on purpose — every remaining BLOCK a `file:line` with its keep-reason, every ADVISE and whole-file finding either confirmed intentional or fixed.
 
 ### Read the output
 
-Three groups, highest impact first. BLOCK and ADVISE messages are full sentences from the rule table — read them as written. Each line is `path:line,...  message`, line-sorted; a message that fires on several lines collapses to one line listing every site (`path:8,33-34  message`), so a sheet with fifteen `calc()` defects shows one line, not fifteen. The trailing count is defect occurrences, not displayed lines — a grouped line still counts each site.
-
-A finding inside object-form CSS-in-JS — a `style={{ }}`, `sx`, or `styled.div({ })` object — is reported against the line its object literal opens on, not the individual key, because the declarations are read out of camelCase keys into one synthetic block. That line is also where a `/* csspro-ignore */` marker goes to silence it.
+Groups print highest impact first, in the rule table's own sentences — report them as written. Each line is `path:line,line,…  message`: one message that fired on several lines collapses to a single line listing every site, so a sheet with fifteen `calc()` defects shows one line, not fifteen. The trailing count is defect occurrences, not displayed lines.
 
 **BLOCK** — provable from the file alone; what the hook blocks on a write. Fix these.
 
-**ADVISE** — measurable cost or accessibility risk, often intentional (handled globally, or a known trade-off). Capped to three on a write; the audit lists every occurrence with its line.
+**ADVISE** — measurable cost or accessibility risk, often intentional: handled globally, or a known trade-off.
 
-**WHOLE-FILE** — only visible at file scale. Each message names the finding, its line and its fix; below is what the message does not print — the threshold that made it fire, and how to dispose of it.
+**WHOLE-FILE** — only visible at file scale. Each message names the finding, its line and its fix; the threshold that made it fire is not printed:
 
-- _Repeated declarations_ — two different selectors carrying the same declarations, in any order, under the same at-rule conditions. Merging them into one selector list, or onto a shared class, changes nothing a browser can observe. Fewer than two shared declarations is not reported.
-- _Overlapping declarations_ — the same, one declaration short of identical: a block copied from another and then drifted. Reported when the shared set is at least four declarations _and_ most of both blocks, so a long rule that merely agrees on some `font-*` lines does not fire.
+- _Repeated declarations_ — two different selectors carrying the same declarations, in any order, under the same at-rule conditions. Merging them onto one selector list or a shared class changes nothing a browser can observe. Fewer than two shared declarations is not reported.
+- _Overlapping declarations_ — one declaration short of identical: a block copied from another and then drifted. Needs at least four shared declarations _and_ most of both blocks, so a long rule that merely agrees on some `font-*` lines does not fire.
 - _Unused / undefined custom property_ — with the run scoped wide enough (above), a remaining one is dead or a typo (`--color-primayr`). Confirm before deleting.
+
+A finding inside an object-form style — `style={{ }}`, `sx`, `styled.div({ })` — is reported against the line its object literal opens on, because the declarations are read out of camelCase keys into one synthetic block. That line is also where the `/* csspro-ignore */` marker goes.
 
 ## Review — a diff
 
-Reads the changed lines of a CSS or motion diff. Scope is what the diff changes; a general code review asked for, say out of scope.
+Scope is what the diff changes; a general code review asked for, say out of scope.
 
-**Run the checks before reading the diff.** The rule table is executable — do not apply it from memory, and do not judge a declaration the script can decide for you. One command covers every file type:
+**Run the checks before reading the diff** — the rule table is executable, so no declaration the script can decide gets judged from memory:
 
 ```sh
-# Every changed file that holds CSS — stylesheet, CSS-in-JS, or single-file component.
 node "${CLAUDE_PLUGIN_ROOT}/skills/css-audit/audit.mjs" <changed-file>...
 ```
 
 The audit reads the whole file, so keep the findings whose line falls inside a changed hunk and drop the rest — those are the audit's business, not this review's. A file the diff touches that the audit reports as clean has no provable defects in it; say so rather than re-deriving it.
 
-Then read the diff for what the script cannot decide: a motion diff adds the motion bar below — motion-specific regressions the rule table does not name, plus feel. Default to flagging — unsure whether motion feels right, delete it. css-craft's "What bites" covers the mechanical gotchas behind the rest.
-
-The rule table is the authority for provable defects. Where it and the motion bar overlap, report once: `transition: all` and layout-property transitions are BLOCK in the rule table; `ungated :hover` is ADVISE there; `prefers-reduced-motion` is ADVISE there but the motion verdict Blocks it — the motion tier wins.
+Then read the diff for what the script cannot decide: css-craft's "What bites" for the mechanical gotchas, and for a motion diff the bar below plus feel. Default to flagging — unsure whether motion feels right, delete it. Report each issue once; where the motion bar and the rule table both reach a line, the motion tier wins.
 
 ### The motion bar
 
-Read every changed line against `## Done when` in motion-craft's [`SKILL.md`](../motion-craft/SKILL.md) — that list is the bar, and every line of it the diff misses is a finding. The values that list cites sit above it in the same file: the frequency table, the `--ease-*` tokens, the duration bands, the four decision-engine constraints. [`TECHNIQUES.md`](../motion-craft/TECHNIQUES.md) holds the blur ceiling and `will-change` scope; when feel can't be judged from code alone, say so and point at its `## Debugging`.
+Read every changed line against `## Done when` in motion-craft's [`SKILL.md`](../motion-craft/SKILL.md) — that list is the bar, every line of it the diff misses is a finding, and the values it cites sit in the sections above it in the same file. When feel cannot be judged from code alone, say so and point at [`TECHNIQUES.md`](../motion-craft/TECHNIQUES.md)'s `## Debugging`.
 
 ### Output format
 
@@ -77,13 +63,11 @@ Two parts.
 
 **Part 1 — Findings table.** Single markdown table, one row per issue.
 
-| Before                                | After                                  | Why                                                                         |
-| ------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------- |
-| `100vh`                               | `100dvh`                               | `100vh` ignores mobile browser chrome; `100dvh` tracks the visible viewport |
-| `transition: all 300ms`               | `transition: transform 200ms ease-out` | Name the properties; `all` animates unintended ones off-GPU                 |
-| `transform: scale(0)`                 | `transform: scale(0.95); opacity: 0`   | Nothing appears from nothing — `scale(0)` looks like it came from nowhere   |
-| `transform-origin: center` on popover | `var(--transform-origin)` (Base UI)    | Popovers scale from the trigger, not center (modals exempt)                 |
+| Before                                | After                                | Why                                                                       |
+| ------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- |
+| `transform: scale(0)`                 | `transform: scale(0.95); opacity: 0` | Nothing appears from nothing — `scale(0)` looks like it came from nowhere |
+| `transform-origin: center` on popover | `var(--transform-origin)` (Base UI)  | Popovers scale from the trigger, not center (modals exempt)               |
 
-**Part 2 — Verdict.** Group remaining commentary by impact, highest first. Close with an explicit decision. **Block** on a provable defect — a rule-table BLOCK, or a measurable motion defect (non-GPU animation with an easy GPU fix, missing `prefers-reduced-motion` on movement) — or, in a motion review, a design judgment: feel-breaking regression, animation on a keyboard/high-frequency action, `scale(0)` or `ease-in` on UI. Say which kind each blocking item is. **Approve** when every provable defect is cleared and, for motion, feel holds — durations/easing within bounds, interruptibility handled, reduced-motion respected, nothing left worth deleting. Cite `file:line`.
+**Part 2 — Verdict.** Group remaining commentary by impact, highest first. Close with an explicit decision. **Block** on a provable defect — a rule-table BLOCK, or a measurable motion defect — or, in a motion review, on a design judgment the bar names; say which kind each blocking item is. **Approve** when every provable defect is cleared and, for motion, feel holds with nothing left worth deleting. Cite `file:line`.
 
 **Done when** the checks above have been run and their output quoted, every changed line measured against the bar (and the motion bar, plus feel, if motion), every provable defect flagged with `file:line`, and a Block/Approve verdict closes. ADVISE findings are reported in the table, not disposed — a review is lighter than an audit. A review that never ran the script is not done, however careful the reading was.

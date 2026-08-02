@@ -7,6 +7,7 @@ import { ADVISE, BLOCK, DECLARATION, runRules, STYLE_MARKERS } from './rules.mjs
 
 const MODE = process.argv[2];
 const ADVISORY_CAP = 3;
+const DEGRADED = '\0degraded';
 
 function addedText({ tool_name, tool_input = {} }) {
   if (tool_name === 'Write') return tool_input.content ?? '';
@@ -42,8 +43,9 @@ const firedMessages = (rules, text, path, readFile) =>
     return where ? `${h.msg}  [${where}]` : h.msg;
   });
 
+let payload = {};
 try {
-  const payload = JSON.parse((await text(process.stdin)) || '{}');
+  payload = JSON.parse((await text(process.stdin)) || '{}');
   const path = payload.tool_input?.file_path;
   if (!path || !AUDITABLE.test(path)) process.exit(0);
 
@@ -70,7 +72,6 @@ try {
   const key = (msg) => `${path}\t${msg}`;
   const BASELINED = key('');
 
-  // Advisories the file already carried count as said, so post only reports what this write added.
   function baselineExistingAdvisories() {
     try {
       if (statSync(path).size <= MAX_BYTES) {
@@ -95,7 +96,8 @@ try {
             permissionDecisionReason:
               `css-pro refused this write to ${path}:\n` +
               blocks.map((m) => `- ${m}`).join('\n') +
-              '\nFix these and write again.',
+              '\nFix these and write again. css-craft covers the mechanics, ' +
+              'motion-craft the duration and easing values.',
           },
         }),
       );
@@ -121,5 +123,19 @@ try {
   }
 } catch (e) {
   const why = String(e?.message ?? e).split('\n')[0];
-  process.stdout.write(JSON.stringify({ systemMessage: `css-pro: check skipped (${why})` }));
+  const say = () =>
+    process.stdout.write(
+      JSON.stringify({
+        systemMessage: `css-pro: check skipped (${why}). Writes are not being blocked.`,
+      }),
+    );
+  if (payload.session_id) {
+    const ledger = stateFile('said', payload);
+    if (!recall(ledger).has(DEGRADED)) {
+      remember(ledger, [DEGRADED]);
+      say();
+    }
+  } else {
+    say();
+  }
 }

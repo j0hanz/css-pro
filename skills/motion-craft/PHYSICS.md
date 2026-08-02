@@ -43,7 +43,7 @@ Motion / Framer Motion parameterise same spring differently — map explicit:
 | Response      | `visualDuration`       | seconds to visually reach target (Motion 11.12.0+)            |
 | —             | `duration`             | whole spring incl. settle tail — longer than response, not it |
 
-For prescriptive default config (when use bounce, which duration), see "Springs" in [`SKILL.md`](SKILL.md).
+For prescriptive default config (when use bounce, which `visualDuration`), see "Springs" in [`SKILL.md`](SKILL.md).
 
 ## Velocity handoff — the seam between drag and animation
 

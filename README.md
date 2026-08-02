@@ -7,11 +7,6 @@ be demonstrated — invalid values, declarations that silently do nothing, measu
 performance traps, accessibility failures — and say nothing about how your CSS should
 look.
 
-**It announces itself, once.** At session start (and again after a compaction), if the
-repo holds styles, a short reminder tells the agent the gate is deliberate and fixable
-— so the first refused write is read as a repair to make, not a bug to route around. In a
-repo with no CSS it says nothing.
-
 **It blocks writes.** Eight rules refuse a write outright, because a defect that never
 reaches disk is cheaper than one you argue about afterwards. Each blocking rule is
 provable from the edit alone. Everything less certain advises instead, capped at three

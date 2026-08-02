@@ -10,10 +10,6 @@ import {
   STYLE_GLOBS,
 } from './changed.mjs';
 
-const BRIEF =
-  'css-pro refuses a write whose CSS carries a defect provable from the edit alone. ' +
-  'A refusal is this hook, not the user rejecting the edit.';
-
 function hasStyles(cwd) {
   const dir = cwd.replace(/\\/g, '/');
   const r = spawnSync(
@@ -33,23 +29,12 @@ try {
   const payload = JSON.parse((await text(process.stdin)) || '{}');
   const cwd = payload.cwd || process.cwd();
 
-  const styles = hasStyles(cwd);
   try {
     writeFileSync(
       stateFile('session', { session_id: payload.session_id }),
-      styles ? baseline(cwd) : sessionStart(),
+      hasStyles(cwd) ? baseline(cwd) : sessionStart(),
     );
   } catch {}
-
-  if (!styles) process.exit(0);
-  process.stdout.write(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: payload.hook_event_name || 'SessionStart',
-        additionalContext: BRIEF,
-      },
-    }),
-  );
 } catch {
   process.exit(0);
 }
